@@ -4,7 +4,7 @@ emoji: 🔎
 colorFrom: gray
 colorTo: blue
 sdk: docker
-app_port: 1666
+app_port: 3000
 pinned: false
 license: mit
 short_description: LibreSearch, Search-2api, Grok, Tavily and Firecrawl MCP
