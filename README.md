@@ -1,13 +1,13 @@
 ---
-title: FusionSearch MCP
-emoji: 🔎
-colorFrom: gray
-colorTo: blue
+title: claw.
+emoji: 🐾
+colorFrom: purple
+colorTo: indigo
 sdk: docker
 app_port: 3000
 pinned: false
 license: mit
-short_description: LibreSearch, Search-2api, Grok, Tavily and Firecrawl MCP
+short_description: 夜里亮着的一盏灯，给认得路的人
 ---
 
 <div align="center">
