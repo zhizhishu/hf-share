@@ -2108,6 +2108,27 @@ export function createApp(userConfig = {}) {
     );
   }
 
+  // Optional co-located CloudSpace subscription stack (Sub-Store) mount. When
+  // MOUNT_SUBSTORE is on, reverse-proxy /cloud/* to the CloudSpace access gateway on
+  // 127.0.0.1:SUBSTORE_GATEWAY_PORT. Unlike /email, the /cloud prefix is NOT stripped:
+  // the gateway runs with CLOUDSPACE_MOUNT_PREFIX=/cloud and rewrites the frontend
+  // asset/API/redirect/lock paths under /cloud itself (see cloud/cloudspace-access-proxy.js
+  // + build-time cloud/scripts/frontend-subpath.js). Mounted BEFORE express.json (the
+  // stack streams large request bodies + SSE and manages its own body parsing) and BEFORE
+  // siteGate (it has its own access lock). Default OFF — fusion still deploys unchanged.
+  if (['true', '1', 'yes', 'on'].includes(String(process.env.MOUNT_SUBSTORE ?? '').toLowerCase())) {
+    const cloudTarget = process.env.SUBSTORE_UPSTREAM ?? `http://127.0.0.1:${process.env.SUBSTORE_GATEWAY_PORT ?? '7861'}`;
+    app.use(
+      createProxyMiddleware({
+        pathFilter: (pathname) => pathname === '/cloud' || pathname.startsWith('/cloud/'),
+        target: cloudTarget,
+        changeOrigin: true,
+        ws: true
+        // No pathRewrite: forward the /cloud prefix intact (the gateway is mount-aware).
+      })
+    );
+  }
+
   app.use(express.json());
   app.use(
     cors({

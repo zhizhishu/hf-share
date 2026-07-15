@@ -39,7 +39,7 @@ function boot() {
   // 左海=email, 右海=fusion。点击 → 视觉离场动效 + 跳各自服务(各自原生登录)。
   const ENTRIES = [
     { key: "email",  el: $("hotspot-email"),  world: new THREE.Vector3(-48, 3.2, -46), top: 7,  href: (window.__ENTRY_EMAIL__  || "/email/") },
-    { key: "cloud",  el: $("hotspot-cloud"),  world: new THREE.Vector3(0, 9, -52),     top: 13, href: (window.__ENTRY_CLOUD__  || "https://alphaeee-cloudspace.hf.space/") },
+    { key: "cloud",  el: $("hotspot-cloud"),  world: new THREE.Vector3(0, 9, -52),     top: 13, href: (window.__ENTRY_CLOUD__  || "/cloud/") },
     { key: "fusion", el: $("hotspot-fusion"), world: new THREE.Vector3(48, 3.2, -46),  top: 7,  href: (window.__ENTRY_FUSION__ || "/admin") },
   ]
   let leaving = false
