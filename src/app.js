@@ -2131,6 +2131,20 @@ export function createApp(userConfig = {}) {
     password: config.siteGatePassword ?? process.env.SITE_GATE_PASSWORD ?? '',
     secret: config.sessionSecret || process.env.SESSION_SECRET || ''
   });
+  // ---- claw 海洋入口:根 / 出三入口导航页(公开,挂在 siteGate 之前) ----
+  // 左海→/email(邮箱自登录) · 中→cloudspace 外链 · 右海→/admin(fusion 搜索,由下方 siteGate 挡即梦 gate)。
+  // 只对浏览器 GET(text/html)出入口页;其余(带 token / API / 非 html)照常落到 siteGate。
+  const ENTRY_DIR = path.resolve(__dirname, '../public/entry');
+  app.use('/entry', express.static(ENTRY_DIR));
+  app.get('/', (req, res, next) => {
+    const accept = String(req.headers.accept || '');
+    if (req.method === 'GET' && accept.includes('text/html')) {
+      res.set('Cache-Control', 'no-store').type('html').sendFile(path.join(ENTRY_DIR, 'login.html'));
+      return;
+    }
+    next();
+  });
+
   app.use(siteGate.middleware);
   app.use('/gate', express.static(siteGate.gateDir));
   app.post('/api/gate/login', asyncHandler(async (req, res) => {
