@@ -131,16 +131,12 @@ ENV PATH=/usr/local/bin:$PATH
 ENV GRANIAN_PROCESS_NAME=fusionsearch-libre
 ENV PORT=3000
 
-# 运行镜像装 curl：cloud/start.sh 的 restore/backup/wait/health 全靠 curl，libresearch base 默认没有
-# (实证 restore-diag: curl not found exit=127)。base 无 apt 也无 apk，故探测多种包管理器逐一尝试；
-# 装不上也不让 build 失败(末行 echo 兜底 exit 0)、并打印 base 工具清单供诊断下一步。
-RUN echo "[base-probe] curl=$(command -v curl||echo NO) wget=$(command -v wget||echo NO) apt=$(command -v apt-get||echo NO) apk=$(command -v apk||echo NO) dnf=$(command -v dnf||echo NO) yum=$(command -v yum||echo NO) micromamba=$(command -v micromamba||echo NO) pip=$(command -v pip||echo NO)"; \
-    ( command -v apt-get >/dev/null 2>&1 && apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/* ) \
-    || ( command -v apk >/dev/null 2>&1 && apk add --no-cache curl ) \
-    || ( command -v dnf >/dev/null 2>&1 && dnf install -y curl ) \
-    || ( command -v micromamba >/dev/null 2>&1 && micromamba install -y -n base curl ) \
-    || echo "[base-probe] no known pkg manager could install curl"; \
-    echo "[base-probe] curl after = $(command -v curl || echo STILL-MISSING)"
+# 运行镜像装 curl：cloud/start.sh 的 restore/backup/wait/health 全靠 curl，而 libresearch base 无 curl、
+# 无任何包管理器、只有 wget(base-probe 实证：curl=NO wget=/usr/sbin/wget apt/apk/dnf/pip 全 NO)。
+# 故用 base 自带 wget 下载静态 curl 二进制(单文件零依赖、amd64)放进 PATH，build 时 --version 自验。
+RUN wget -q -O /usr/local/bin/curl "https://github.com/moparisthebest/static-curl/releases/latest/download/curl-amd64" \
+    && chmod +x /usr/local/bin/curl \
+    && /usr/local/bin/curl --version | head -1
 
 # node 22 二进制 + 全局 npm/npx
 COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
