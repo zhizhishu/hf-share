@@ -83,7 +83,7 @@ function main() {
   // and anything already under the prefix (idempotency).
   const notDoneLA = `(?!/|${escapeRe(name)}/)`;
 
-  const stats = { html: 0, base: 0, entryHelper: 0, cssUrl: 0, jsAsset: 0, manifest: 0, swDisabled: 0 };
+  const stats = { html: 0, base: 0, hostapi: 0, entryHelper: 0, cssUrl: 0, jsAsset: 0, manifest: 0, swDisabled: 0 };
   const files = walk(dir, []);
 
   for (const f of files) {
@@ -122,6 +122,30 @@ function main() {
       } else if (/<head(\s[^>]*)?>/i.test(s)) {
         s = s.replace(/(<head(?:\s[^>]*)?>)/i, `$1<base href="${prefix}/">`);
         stats.base++;
+      }
+
+      // ---- SPA backend baseURL pin (same-origin) ----
+      // The Sub-Store front-end derives its axios baseURL from localStorage.hostAPI, falling
+      // back to a built-in default backend URL. The gateway's runtime JS branding rewrites
+      // that default ("https://sub.store" -> "https://cloudspace.local" -> "") to an EMPTY
+      // string, so if hostAPI is not already set the baseURL becomes "" and every API call hits
+      // the site ROOT ("/api/...") — which under a sub-path mount lands on the front proxy's
+      // root (no /api there), returning no data. Bake a tiny inline pin that runs before the
+      // deferred app module and force-sets hostAPI to the same-origin backend at "<prefix>/",
+      // so the baseURL is correct on the very first request, independent of the runtime
+      // bootstrap-injection timing. (The runtime bootstrap sets the same thing; this guarantees
+      // it even if that injection is ever bypassed.) No-op at root (empty prefix short-circuits
+      // the whole script above).
+      const pinMarker = "cloudspace-subpath-backend-pin";
+      if (!s.includes(pinMarker)) {
+        const pin = `<script>/*${pinMarker}*/(function(){try{var n="CloudSpace",d=JSON.stringify({current:n,apis:[{name:n,url:"${prefix}/"}]});localStorage.setItem("hostAPI",d);localStorage.setItem("backendConfigured","true");localStorage.setItem("magicPathConfigured","true");}catch(e){}})();</script>`;
+        if (/<base\s+href="[^"]*"\s*\/?>/i.test(s)) {
+          s = s.replace(/(<base\s+href="[^"]*"\s*\/?>)/i, `$1${pin}`);
+          stats.hostapi++;
+        } else if (/<head(\s[^>]*)?>/i.test(s)) {
+          s = s.replace(/(<head(?:\s[^>]*)?>)/i, `$1${pin}`);
+          stats.hostapi++;
+        }
       }
     }
 
@@ -172,6 +196,11 @@ function main() {
     if (!h.includes(`<base href="${prefix}/">`)) {
       errs.push(`index.html has no <base href="${prefix}/"> (SPA router base missing — /subs will 404; <head> markup changed?)`);
     }
+    // Backend baseURL pin: without it the frontend's (branded-to-empty) default baseURL sends
+    // API calls to the site root and no data loads under the mount.
+    if (!h.includes("cloudspace-subpath-backend-pin") || !h.includes(`url:"${prefix}/"`)) {
+      errs.push(`index.html has no hostAPI backend pin for "${prefix}/" (API calls will hit the site root; <head> markup changed?)`);
+    }
   } else {
     errs.push("index.html not found in frontend dir");
   }
@@ -202,8 +231,8 @@ function main() {
   }
 
   console.log(
-    `[subpath] rewrites: html=${stats.html} base=${stats.base} entryHelper=${stats.entryHelper} cssUrl=${stats.cssUrl} ` +
-    `jsAsset=${stats.jsAsset} manifest=${stats.manifest} swDisabled=${stats.swDisabled}`
+    `[subpath] rewrites: html=${stats.html} base=${stats.base} hostapi=${stats.hostapi} entryHelper=${stats.entryHelper} ` +
+    `cssUrl=${stats.cssUrl} jsAsset=${stats.jsAsset} manifest=${stats.manifest} swDisabled=${stats.swDisabled}`
   );
 
   if (errs.length) {

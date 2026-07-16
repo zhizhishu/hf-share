@@ -961,20 +961,26 @@ function cloudspaceConfig() {
   return {
     productName,
     backend: {
-      apiBase: "/",
+      // Browser-facing API base. Under a sub-path mount this is "<mountPrefix>/" so any
+      // consumer that derives an API base from it targets "<mountPrefix>/api" (which the front
+      // proxy forwards back here), not the site root. (The Sub-Store front-end itself pins its
+      // axios baseURL via localStorage.hostAPI — see frontendBootstrapScript + the build-time
+      // hostAPI pin in scripts/frontend-subpath.js — this keeps the self-describing config
+      // accurate for any other consumer under the mount.)
+      apiBase: withMountPrefix("/"),
       sameOrigin: true
     },
     access: {
       model: "one-password-same-origin",
-      login: "/__lock/login",
-      password: "/__lock"
+      login: withMountPrefix("/__lock/login"),
+      password: withMountPrefix("/__lock")
     },
     routes: {
-      lock: "/__lock",
-      health: cloudspaceHealthPath,
-      config: cloudspaceConfigPath,
-      api: "/api",
-      jobs: cloudspaceJobsPath
+      lock: withMountPrefix("/__lock"),
+      health: withMountPrefix(cloudspaceHealthPath),
+      config: withMountPrefix(cloudspaceConfigPath),
+      api: withMountPrefix("/api"),
+      jobs: withMountPrefix(cloudspaceJobsPath)
     },
     cirrus: {
       enabled: httpMetaEnabled,
