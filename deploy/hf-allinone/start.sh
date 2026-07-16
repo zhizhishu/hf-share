@@ -149,17 +149,20 @@ if [ -n "${PERPLEXITY_TOKEN_CONFIG:-}" ]; then
   PPLX_TOKEN_POOL_OUT=/app/services/perplexity/token_pool_config.json \
     /opt/pplx-venv/bin/python /app/services/perplexity/inject_heartbeat.py \
     || printf '%s' "$PERPLEXITY_TOKEN_CONFIG" > /app/services/perplexity/token_pool_config.json
-  # 热更内部 admin token(node 的 sync-token 端点热更 Python 池要用同值;node/python 同为子进程共享此 env)
-  export PPLX_ADMIN_TOKEN="${PPLX_ADMIN_TOKEN:-fs-pplx-hotreload-2026}"
+  # 热更内部 admin token(node 的 sync-token 端点热更 Python 池要用同值;node/python 同为子进程共享此 env)。
+  # 没配就每次启动随机生成(node/python 继承同一 export 值、互认)，不再把固定口令写进公开库。
+  _pplx_rand() { head -c 18 /dev/urandom 2>/dev/null | base64 2>/dev/null | tr -dc 'A-Za-z0-9' | cut -c1-24; }
+  export PPLX_ADMIN_TOKEN="${PPLX_ADMIN_TOKEN:-pplx-adm-$(_pplx_rand)}"
+  export PERPLEXITY_MCP_TOKEN="${PERPLEXITY_MCP_TOKEN:-pplx-key-$(_pplx_rand)}"
   export PERPLEXITY_API_URL="${PERPLEXITY_API_URL:-http://127.0.0.1:8001/v1}"
-  export PERPLEXITY_API_KEY="${PERPLEXITY_API_KEY:-${PERPLEXITY_MCP_TOKEN:-sk-fusion-pplx}}"
+  export PERPLEXITY_API_KEY="${PERPLEXITY_API_KEY:-$PERPLEXITY_MCP_TOKEN}"
   # perplexity 是**可选**第6源：独立自重启 subshell、**绝不加入 pids 监控**——它挂了自己拉起、
   # 更不会触发核心容器 shutdown(不拖垮其它五源)。输出直接进 stdout，便于在 HF 日志里诊断。
   (
     while :; do
       echo "[fusionsearch] (perplexity) starting perplexity.server on :8001"
       ( cd /app/services/perplexity \
-        && MCP_TOKEN="${PERPLEXITY_MCP_TOKEN:-sk-fusion-pplx}" \
+        && MCP_TOKEN="$PERPLEXITY_MCP_TOKEN" \
            SOCKS_PROXY="${PERPLEXITY_SOCKS_PROXY:-${SOCKS_PROXY:-}}" \
            /opt/pplx-venv/bin/python -m perplexity.server --host 127.0.0.1 --port 8001 ) 2>&1
       echo "[fusionsearch] (perplexity) exited status=$?; restart in 20s (不影响核心五源)"
@@ -245,7 +248,9 @@ if [ "${MOUNT_SUBSTORE:-}" = "on" ] || [ "${MOUNT_SUBSTORE:-}" = "true" ] || [ "
       sleep 15
     done
   ) &
-  echo "[fusionsearch] cloudspace(订阅栈) 自重启后台已拉起(独立于搜索/邮箱，挂了不拖垮)"
+  CLOUDSPACE_SUPERVISOR_PID="$!"
+  pids="$pids $CLOUDSPACE_SUPERVISOR_PID"
+  echo "[fusionsearch] cloudspace(订阅栈) 自重启后台已拉起(pid=$CLOUDSPACE_SUPERVISOR_PID, 纳入主监控——内部 /opt/app/start.sh 挂了仍由本层 while 自重启、不拖垮搜索/邮箱；唯有这层守护本身死掉才触发整体重启，避免 /cloud 静默下线无人知)"
 else
   echo "[fusionsearch] MOUNT_SUBSTORE 未开，跳过 cloudspace 订阅栈(fusion 独立模式)"
 fi

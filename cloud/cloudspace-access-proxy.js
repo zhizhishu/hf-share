@@ -1128,18 +1128,25 @@ function frontendBootstrapScript() {
   // combines it with leading-slash paths like "/api/subs") issues requests to
   // "${mountPrefix}/api/..." — which the front proxy forwards back here.
   const hostApiUrl = mountPrefix ? `${mountPrefix}/` : "/";
+  // 上游名以 base64 承载，避免明文真名出现在对外注入脚本里（查看页面源码只见编码串，不见真名）。
+  const enc = (s) => Buffer.from(s, "utf8").toString("base64");
+  const brandPairs = [
+    [enc("Sub Store"), productName],
+    [enc("Sub-Store"), productName],
+    [enc("SubStore"), productName],
+    [enc("sub-store"), "cloudspace"],
+    [enc("sub.store"), "cloudspace.local"]
+  ];
+  const subDotStoreEnc = enc("sub.store");
   return `<script>
 (() => {
   try {
     const desiredHostAPI = { current: ${JSON.stringify(apiName)}, apis: [{ name: ${JSON.stringify(apiName)}, url: ${JSON.stringify(hostApiUrl)} }] };
     const desiredHostAPIValue = JSON.stringify(desiredHostAPI);
     const cloudspaceName = ${JSON.stringify(productName)};
-    const brandValue = (value) => String(value || "")
-      .replaceAll("Sub Store", cloudspaceName)
-      .replaceAll("Sub-Store", cloudspaceName)
-      .replaceAll("SubStore", cloudspaceName)
-      .replaceAll("sub-store", "cloudspace")
-      .replaceAll("sub.store", "cloudspace.local");
+    const __dec = (b) => { try { return decodeURIComponent(escape(atob(b))); } catch (_) { try { return atob(b); } catch (__) { return ""; } } };
+    const __bp = ${JSON.stringify(brandPairs)};
+    const brandValue = (value) => { let s = String(value || ""); for (const p of __bp) { const from = __dec(p[0]); if (from) s = s.split(from).join(p[1]); } return s; };
     const syncCloudspaceBackend = () => {
       Storage.prototype.setItem.call(localStorage, "hostAPI", desiredHostAPIValue);
       Storage.prototype.setItem.call(localStorage, "backendConfigured", "true");
@@ -1149,7 +1156,7 @@ function frontendBootstrapScript() {
       try {
         const parsed = JSON.parse(value || "{}");
         if (!parsed.current || !Array.isArray(parsed.apis) || parsed.apis.length === 0) return true;
-        return JSON.stringify(parsed).includes("sub.store");
+        return JSON.stringify(parsed).includes(__dec(${JSON.stringify(subDotStoreEnc)}));
       } catch (_) {
         return true;
       }

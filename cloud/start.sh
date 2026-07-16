@@ -353,7 +353,9 @@ backup_to_supabase_once() {
     today="$(date -u +%F)"
     last_daily=""
     [ -f /tmp/cloudspace-supabase-daily.date ] && last_daily="$(cat /tmp/cloudspace-supabase-daily.date)"
-    if [ "$today" != "$last_daily" ] || [ "$uploaded_latest" = "true" ]; then
+    # daily 只在当天第一次备份时写(冻结当天首帧)，之后当天不再覆盖——否则当天若有坏数据备份，
+    # 会把当天的救命快照也顶掉。真正保命的冻结点是跨天的旧 daily。
+    if [ "$today" != "$last_daily" ]; then
       daily_object="$(supabase_daily_object_path)"
       if curl_with_limits \
         -X POST \
