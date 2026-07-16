@@ -23,12 +23,14 @@ FROM node:22-bookworm-slim AS node-runtime
 FROM node:22-bookworm-slim AS claw-builder
 WORKDIR /claw
 # better-sqlite3 原生模块编译依赖（与 clawemail 原 Dockerfile 一致，已验证可行）
+ARG CLAWEMAIL_REF=main
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends python3 make g++ \
+    && apt-get install -y --no-install-recommends python3 make g++ git \
     && rm -rf /var/lib/apt/lists/*
-COPY mail/package*.json ./
-RUN npm ci
-COPY mail/ ./
+# clone-at-build：clawemail 唯一真源 = zhizhishu/ClawEmail（不再 vendored mail/ 拷贝）
+RUN git clone --depth 1 --branch "${CLAWEMAIL_REF}" \
+        https://github.com/zhizhishu/ClawEmail.git . \
+    && npm ci
 # VITE_API_BASE=/email：vite base 让静态资源引用带 /email 前缀，同时前端 API/SSE/附件
 # 全走 /email（api.ts 的 API_BASE 读同一个 VITE_API_BASE）。esbuild 后端 bundle 一并产出。
 RUN VITE_API_BASE=/email npm run build
@@ -125,6 +127,14 @@ RUN rm -rf modules assets README.md Dockerfile dockerignore .gitignore \
     && rm -f /tmp/rebrand.js
 
 # ---- 最终 all-in-one：libregroup/libresearch (Void Linux glibc) ----
+# ---- fusion 源：clone fusionsearch-mcp（唯一真源，不再 vendored 在 claw 仓根）----
+FROM alpine/git AS fusion-src
+ARG FUSION_REF=main
+WORKDIR /fusion
+RUN git clone --depth 1 --branch "${FUSION_REF}" \
+        https://github.com/zhizhishu/fusionsearch-mcp.git . \
+    && rm -rf .git
+
 FROM libregroup/libresearch:latest
 
 WORKDIR /app
@@ -147,26 +157,27 @@ COPY --from=node-runtime /usr/local/lib/node_modules /usr/local/lib/node_modules
 RUN ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && ln -sf ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
 
-# fusion node 依赖
-COPY package*.json ./
+# fusion node 依赖（源来自 fusion-src clone）
+COPY --from=fusion-src /fusion/package*.json ./
 RUN npm ci --omit=dev
 
 # search2api venv
-COPY services/search2api/requirements.txt ./services/search2api/requirements.txt
+COPY --from=fusion-src /fusion/services/search2api/requirements.txt ./services/search2api/requirements.txt
 RUN python3 -m venv /opt/search2api-venv \
     && /opt/search2api-venv/bin/pip install --no-cache-dir -r /app/services/search2api/requirements.txt
 
 # perplexity venv（curl_cffi manylinux wheel，无需浏览器/编译器；--copies 防 symlink 断链）
-COPY services/perplexity/requirements.txt ./services/perplexity/requirements.txt
+COPY --from=fusion-src /fusion/services/perplexity/requirements.txt ./services/perplexity/requirements.txt
 RUN python3 -m venv --copies /opt/pplx-venv \
     && /opt/pplx-venv/bin/pip install --no-cache-dir -r /app/services/perplexity/requirements.txt \
     && /opt/pplx-venv/bin/python -c "import curl_cffi, fastmcp, aiohttp, aiohttp_socks, websocket; print('[build] perplexity venv self-check OK')"
 
-# fusion 源码
-COPY src ./src
-COPY public ./public
-COPY services ./services
-COPY deploy ./deploy
+# fusion 源码（来自 fusion-src clone；claw 独有的海洋入口 public/entry 单独 COPY 覆盖）
+COPY --from=fusion-src /fusion/src ./src
+COPY --from=fusion-src /fusion/public ./public
+COPY --from=fusion-src /fusion/services ./services
+COPY --from=fusion-src /fusion/deploy ./deploy
+COPY public/entry ./public/entry
 
 # clawemail 构建产物（dist + 生产 node_modules 含 better-sqlite3 原生模块）→ /app/mail
 COPY --from=claw-builder /claw/dist /app/mail/dist
