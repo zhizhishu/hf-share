@@ -134,9 +134,10 @@ ENV PORT=3000
 # 运行镜像装 curl：cloud/start.sh 的 restore/backup/wait/health 全靠 curl，而 libresearch base 无 curl、
 # 无任何包管理器、只有 wget(base-probe 实证：curl=NO wget=/usr/sbin/wget apt/apk/dnf/pip 全 NO)。
 # 故用 base 自带 wget 下载静态 curl 二进制(单文件零依赖、amd64)放进 PATH，build 时 --version 自验。
-RUN wget -q -O /usr/local/bin/curl "https://github.com/moparisthebest/static-curl/releases/latest/download/curl-amd64" \
-    && chmod +x /usr/local/bin/curl \
-    && /usr/local/bin/curl --version | head -1
+RUN ( wget -q -O /usr/local/bin/curl "https://github.com/moparisthebest/static-curl/releases/latest/download/curl-amd64" \
+      && chmod +x /usr/local/bin/curl \
+      && /usr/local/bin/curl --version | head -1 ) \
+    || echo "[warn] static curl 安装失败(wget下载或arm64架构)，build 继续、restore/backup 退回手动灌"
 
 # node 22 二进制 + 全局 npm/npx
 COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
