@@ -238,10 +238,10 @@ wait_for_cloudspace_core() {
   timeout="${CLOUDSPACE_BACKUP_WAIT_SECONDS:-600}"
   i=0
   while [ "$i" -lt "$timeout" ]; do
-    # 首选健康端点 2xx；fallback：core 端口有任何 HTTP 响应即视为就绪(listening 即可)。
-    # 避开 /api/utils/env 内部直连持续探不通的老坑——实证 core 早就绪能查订阅、旧判据却 600s 超时。
-    if curl -fsS --connect-timeout 2 --max-time 5 "${CLOUDSPACE_INTERNAL_API_BASE}/api/utils/env" >/dev/null 2>&1 \
-       || curl -s -o /dev/null --connect-timeout 2 --max-time 5 "http://127.0.0.1:${CLOUDSPACE_BACKEND_API_PORT}/" 2>/dev/null; then
+    # 真凶是 curl 的 -f：core 的 /api/utils/env 直连返回非 2xx(需认证，故经网关带登录态是 200、裸 curl 是 401)，
+    # -fsS 把非 2xx 判成"没就绪"、干等到 600s 超时；这个 wait 一卡又连累网关晚起、restore 被跳过。
+    # 实证：core 秒起(日志 migrating→listening 一秒内完成)。去掉 -f，只要 core 有任何 HTTP 响应即视为就绪。
+    if curl -s -o /dev/null --connect-timeout 2 --max-time 5 "${CLOUDSPACE_INTERNAL_API_BASE}/api/utils/env" >/dev/null 2>&1; then
       return 0
     fi
     i=$((i + 1))
