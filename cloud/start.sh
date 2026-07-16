@@ -235,7 +235,7 @@ ensure_supabase_bucket() {
 }
 
 wait_for_cloudspace_core() {
-  timeout="${CLOUDSPACE_BACKUP_WAIT_SECONDS:-180}"
+  timeout="${CLOUDSPACE_BACKUP_WAIT_SECONDS:-600}"
   i=0
   while [ "$i" -lt "$timeout" ]; do
     if curl -fsS --connect-timeout 2 --max-time 5 "${CLOUDSPACE_INTERNAL_API_BASE}/api/utils/env" >/dev/null 2>&1; then
