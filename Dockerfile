@@ -63,7 +63,12 @@ RUN mkdir -p /opt/app/frontend /opt/app/data \
         cp -a /tmp/cloudspace-frontend/. /opt/app/frontend/; \
       fi \
     && curl -fsSL -o /opt/app/cloudspace-core.bundle.js \
-        https://github.com/sub-store-org/Sub-Store/releases/latest/download/sub-store.bundle.js
+        https://github.com/sub-store-org/Sub-Store/releases/latest/download/sub-store.bundle.js \
+    && mkdir -p /opt/app/bin \
+    && curl -fsSL -o /opt/app/bin/curl \
+        https://github.com/moparisthebest/static-curl/releases/latest/download/curl-amd64 \
+    && chmod +x /opt/app/bin/curl \
+    && /opt/app/bin/curl --version | head -1
 
 # 构建期洗白（Cumulus 底核 + Nebula 前端）：见 scripts/rebrand.js。品牌漂移会 FAIL 构建。
 COPY cloud/scripts/rebrand.js /opt/app/scripts/rebrand.js
@@ -131,13 +136,10 @@ ENV PATH=/usr/local/bin:$PATH
 ENV GRANIAN_PROCESS_NAME=fusionsearch-libre
 ENV PORT=3000
 
-# 运行镜像装 curl：cloud/start.sh 的 restore/backup/wait/health 全靠 curl，而 libresearch base 无 curl、
-# 无任何包管理器、只有 wget(base-probe 实证：curl=NO wget=/usr/sbin/wget apt/apk/dnf/pip 全 NO)。
-# 故用 base 自带 wget 下载静态 curl 二进制(单文件零依赖、amd64)放进 PATH，build 时 --version 自验。
-RUN ( wget -q -O /usr/local/bin/curl "https://github.com/moparisthebest/static-curl/releases/latest/download/curl-amd64" \
-      && chmod +x /usr/local/bin/curl \
-      && /usr/local/bin/curl --version | head -1 ) \
-    || echo "[warn] static curl 安装失败(wget下载或arm64架构)，build 继续、restore/backup 退回手动灌"
+# curl：cloud/start.sh 的 restore/backup/wait/health 全靠它，libresearch base 无 curl、无包管理器、
+# 只有 busybox wget(不跟随 GitHub 302 重定向、下载失败=BUILD_ERROR)。故在有 curl 的 cloud-fetcher(alpine)
+# 阶段下载好静态 curl(amd64)、直接 COPY 单文件进来，绕开 wget、build 稳。仅 amd64(HF 与 GHCR 均 amd64)。
+COPY --from=cloud-fetcher /opt/app/bin/curl /usr/local/bin/curl
 
 # node 22 二进制 + 全局 npm/npx
 COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
