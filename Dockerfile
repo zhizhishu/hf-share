@@ -131,6 +131,12 @@ ENV PATH=/usr/local/bin:$PATH
 ENV GRANIAN_PROCESS_NAME=fusionsearch-libre
 ENV PORT=3000
 
+# 运行镜像装 curl：cloud/start.sh 的 restore/backup/wait/health 全靠 curl，而 libresearch base 默认没有。
+# 实证(restore-diag)：curl: not found exit=127 → restore/backup 从未自动成功、就绪判据永远失败(白改 8 次判据)。
+# 兼容 debian(apt) / alpine(apk) 两种 base，谁在用谁。
+RUN (apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*) \
+    || apk add --no-cache curl
+
 # node 22 二进制 + 全局 npm/npx
 COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
 COPY --from=node-runtime /usr/local/lib/node_modules /usr/local/lib/node_modules
