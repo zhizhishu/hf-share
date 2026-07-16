@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex">
+  <title>CloudSpace</title>
+  <script>document.documentElement.classList.add("js")</script>
+  <style>
+    /* ============================================================
+       CloudSpace pre-login ocean cover.
+       Ported & rebranded from vertex/ocean-landing.css. Uses a system
+       font stack only (no third-party / copyrighted fonts).
+       Progressive enhancement: with no JS the loader is skipped and the
+       password panel is shown directly, so the form is always reachable.
+       ============================================================ */
+    :root {
+      --u: calc(100vw / 390);            /* mobile design unit */
+      --bg: #04070d;
+      --fg: #eef3f8;
+      --accent: #9bb8e1;
+      --accent-deep: #2c4e73;
+      --muted: #5d6c7d;
+      --copy: #b7c6d4;
+      color-scheme: dark;
+    }
+    @media (min-width: 1024px) { :root { --u: calc(100vw / 1440); } }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; }
+    body {
+      background:
+        radial-gradient(120% 90% at 50% 12%, #2a3a4d 0%, #131c27 46%, var(--bg) 100%);
+      color: var(--fg);
+      overflow: hidden;
+      font-family: "Inter", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+
+    .cover-root { position: fixed; inset: 0; overflow: hidden; }
+    .cover-canvas { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; display: block; }
+    html:not(.js) .cover-canvas { display: none; }
+
+    .cover-vignette {
+      position: fixed; inset: 0; z-index: 1; pointer-events: none;
+      background:
+        radial-gradient(130% 100% at 50% 30%, transparent 42%, rgba(0,2,9,.50) 100%),
+        linear-gradient(180deg, rgba(0,2,9,.30) 0%, transparent 22%, transparent 70%, rgba(0,2,9,.48) 100%);
+    }
+
+    /* ---- chrome layer ---- */
+    .cover-chrome { position: fixed; inset: 0; z-index: 5; pointer-events: none; }
+    .cover-chrome a, .cover-chrome button { pointer-events: auto; }
+
+    .cover-logo { position: fixed; left: calc(64 * var(--u)); top: calc(46 * var(--u)); display: flex; align-items: center; gap: calc(13 * var(--u)); text-decoration: none; color: var(--fg); }
+    .cover-logo-mark { width: calc(38 * var(--u)); height: calc(38 * var(--u)); display: block; }
+    .cover-logo-type { display: flex; flex-direction: column; line-height: 1.05; }
+    .cover-logo-type b { font-weight: 600; font-size: calc(17 * var(--u)); letter-spacing: .12em; text-transform: uppercase; }
+    .cover-logo-type small { font-size: calc(8.5 * var(--u)); letter-spacing: .30em; color: var(--accent); font-weight: 600; text-transform: uppercase; margin-top: calc(3 * var(--u)); }
+
+    .cover-topright { position: fixed; right: calc(64 * var(--u)); top: calc(44 * var(--u)); display: flex; align-items: center; gap: calc(26 * var(--u)); }
+    .cover-toggle { display: inline-flex; align-items: center; gap: calc(8 * var(--u)); background: none; border: 0; color: var(--fg); font: inherit; font-weight: 600; font-size: calc(10 * var(--u)); letter-spacing: .12em; text-transform: uppercase; cursor: pointer; opacity: .82; }
+    .cover-toggle:hover { opacity: 1; }
+    .cover-toggle b { color: var(--accent); min-width: calc(20 * var(--u)); }
+    .cover-toggle svg { width: calc(24 * var(--u)); height: calc(8 * var(--u)); color: var(--accent); }
+
+    .cover-enter { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: calc(8 * var(--u)); height: calc(34 * var(--u)); min-width: calc(124 * var(--u)); padding: 0 calc(22 * var(--u)); font: inherit; font-weight: 600; font-size: calc(10 * var(--u)); letter-spacing: .14em; text-transform: uppercase; color: var(--fg); text-decoration: none; cursor: pointer; border: 1px solid rgba(155,184,225,.55); border-radius: calc(5 * var(--u)); background: rgba(155,184,225,.05); overflow: hidden; isolation: isolate; transition: border-color .4s ease, background .4s ease; }
+    .cover-enter::before { content: ""; position: absolute; inset: 0; border-radius: inherit; box-shadow: 0 0 calc(18 * var(--u)) rgba(155,184,225,.5); opacity: 0; transition: opacity .4s ease; z-index: -1; }
+    .cover-enter:hover { border-color: var(--accent); background: rgba(155,184,225,.12); }
+    .cover-enter:hover::before { opacity: .6; }
+    .cover-enter-arrow { transition: transform .4s cubic-bezier(.14,1,.34,1); }
+    .cover-enter:hover .cover-enter-arrow { transform: translateX(calc(4 * var(--u))); }
+
+    /* hero */
+    .cover-hero { position: fixed; inset: 0; display: flex; align-items: flex-end; justify-content: space-between; padding: 0 calc(64 * var(--u)) calc(50 * var(--u)); }
+    .cover-hero-title { margin: 0; font-weight: 600; font-size: calc(46 * var(--u)); line-height: 1.0; letter-spacing: -.01em; color: var(--fg); max-width: calc(560 * var(--u)); text-shadow: 0 calc(2*var(--u)) calc(30*var(--u)) rgba(0,2,9,.6); }
+    .cover-hero-title .sub { display: block; font-weight: 500; font-size: calc(13 * var(--u)); letter-spacing: .03em; color: var(--copy); margin-top: calc(14 * var(--u)); line-height: 1.55; max-width: calc(380*var(--u)); }
+    .cover-hero-cta { display: flex; align-items: flex-end; gap: calc(14 * var(--u)); cursor: pointer; background: none; border: 0; color: inherit; font: inherit; padding: 0; }
+    .cover-hero-cta-label { font-weight: 600; font-size: calc(10 * var(--u)); letter-spacing: .1em; text-transform: uppercase; color: var(--fg); max-width: calc(130 * var(--u)); text-align: right; line-height: 1.4; opacity: .9; }
+    .cover-hero-cta-line { width: 1px; height: calc(48 * var(--u)); background: linear-gradient(180deg, var(--accent), var(--accent-deep)); }
+
+    /* crystal click hotspot (positioned by JS) */
+    .cover-hotspot { position: fixed; z-index: 4; transform: translate(-50%, -50%); border-radius: 50%; cursor: pointer; display: none; opacity: 0; transition: opacity .6s ease; }
+    .js .cover-hotspot { display: block; }
+    .cover-hotspot::after {
+      content: ""; position: absolute; inset: 14%; border-radius: 50%;
+      border: 1px solid rgba(206,228,255,.5);
+      box-shadow: 0 0 calc(16*var(--u)) rgba(155,184,225,.35) inset;
+      animation: coverPulse 2.6s ease-in-out infinite;
+    }
+    .cover-hotspot:hover::after { border-color: rgba(227,244,255,.95); }
+    @keyframes coverPulse { 0%,100% { transform: scale(.92); opacity: .5; } 50% { transform: scale(1.06); opacity: .95; } }
+
+    .cover-hint { position: fixed; left: 50%; top: calc(50% + 150 * var(--u)); transform: translateX(-50%); z-index: 5; text-align: center; font-weight: 600; font-size: calc(10 * var(--u)); letter-spacing: .18em; text-transform: uppercase; color: rgba(206,228,255,.78); pointer-events: none; white-space: nowrap; }
+    .cover-hint .zh { display: block; letter-spacing: .24em; margin-bottom: calc(5*var(--u)); font-size: calc(11*var(--u)); color: #e3f4ff; }
+
+    /* loader / intro gate */
+    .cover-loader { position: fixed; inset: 0; z-index: 90; background: var(--bg); display: none; flex-direction: column; align-items: center; justify-content: center; transition: opacity .9s ease; }
+    .js .cover-loader { display: flex; }
+    .cover-loader.is-done { opacity: 0; pointer-events: none; }
+    .cover-loader-tri { position: absolute; inset: 0; margin: auto; width: calc(820 * var(--u)); height: calc(760 * var(--u)); opacity: .30; pointer-events: none; }
+    .cover-loader-tri path { fill: none; stroke: var(--muted); stroke-width: 1px; }
+    .cover-loader-title { font-weight: 600; font-size: calc(30 * var(--u)); letter-spacing: .14em; text-transform: uppercase; color: var(--fg); text-align: center; z-index: 1; }
+    .cover-loader-bar { position: relative; width: calc(120 * var(--u)); height: 2px; background: rgba(155,184,225,.25); margin-top: calc(26 * var(--u)); overflow: hidden; z-index: 1; }
+    .cover-loader-bar i { position: absolute; inset: 0; transform-origin: left center; transform: scaleX(0); background: #e3f4ff; transition: transform .25s ease; }
+    .cover-loader-status { font-weight: 600; font-size: calc(10 * var(--u)); letter-spacing: .22em; text-transform: uppercase; color: var(--fg); margin-top: calc(14 * var(--u)); z-index: 1; }
+    .cover-loader-copy { position: fixed; bottom: calc(30 * var(--u)); left: 0; right: 0; text-align: center; font-weight: 600; font-size: calc(9.5 * var(--u)); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); line-height: 1.7; z-index: 1; }
+
+    /* intro reveal of chrome */
+    .cover-fade { opacity: 1; }
+    .js .cover-fade { opacity: 0; transform: translateY(calc(12 * var(--u))); transition: opacity 1s cubic-bezier(.14,1,.34,1), transform 1s cubic-bezier(.14,1,.34,1); }
+    .js .cover-root.is-entered .cover-fade { opacity: 1; transform: none; }
+    .js .cover-root.is-entered .cover-fade.d1 { transition-delay: .15s; }
+    .js .cover-root.is-entered .cover-fade.d2 { transition-delay: .30s; }
+    .js .cover-root.is-entered .cover-fade.d3 { transition-delay: .45s; }
+
+    /* ---- password panel ---- */
+    .cover-panel {
+      position: fixed; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center;
+      padding: calc(24 * var(--u)); background: rgba(4,7,13,.55); backdrop-filter: blur(calc(6*var(--u)));
+      -webkit-backdrop-filter: blur(calc(6*var(--u)));
+    }
+    /* JS path: hidden until opened */
+    .js .cover-panel { opacity: 0; pointer-events: none; transition: opacity .5s ease; }
+    .js .cover-panel.is-open { opacity: 1; pointer-events: auto; }
+
+    .cover-card {
+      position: relative; width: min(calc(420 * var(--u)), calc(100vw - 40px));
+      padding: calc(34 * var(--u)) calc(32 * var(--u)) calc(30 * var(--u));
+      border: 1px solid rgba(155,184,225,.22); border-radius: calc(14 * var(--u));
+      background: linear-gradient(180deg, rgba(23,35,45,.92), rgba(13,20,27,.94));
+      box-shadow: 0 calc(30*var(--u)) calc(80*var(--u)) rgba(0,0,0,.5), 0 0 calc(40*var(--u)) rgba(155,184,225,.06);
+      transform: translateY(calc(18 * var(--u))) scale(.98);
+      transition: transform .5s cubic-bezier(.14,1,.34,1);
+    }
+    .js .cover-panel.is-open .cover-card { transform: none; }
+    @media (min-width: 1024px) { .cover-card { width: min(420px, calc(100vw - 40px)); padding: 34px 32px 30px; border-radius: 14px; } }
+
+    .cover-card-kicker { font-weight: 700; font-size: calc(10 * var(--u)); letter-spacing: .30em; text-transform: uppercase; color: var(--accent); }
+    @media (min-width: 1024px) { .cover-card-kicker { font-size: 11px; } }
+    .cover-card-title { margin: calc(10*var(--u)) 0 calc(6*var(--u)); font-weight: 600; font-size: calc(24 * var(--u)); letter-spacing: .01em; }
+    @media (min-width: 1024px) { .cover-card-title { font-size: 24px; margin: 10px 0 6px; } }
+    .cover-card-desc { margin: 0 0 calc(18*var(--u)); color: var(--copy); font-size: calc(12.5 * var(--u)); line-height: 1.55; }
+    @media (min-width: 1024px) { .cover-card-desc { font-size: 13px; margin-bottom: 18px; } }
+
+    .cover-error { margin: 0 0 calc(16*var(--u)); padding: calc(10*var(--u)) calc(12*var(--u)); border-radius: calc(8*var(--u)); background: rgba(225,90,90,.14); border: 1px solid rgba(225,120,120,.3); color: #ffd7d7; font-size: calc(12.5*var(--u)); line-height: 1.4; }
+    .cover-error:empty { display: none; }
+    @media (min-width: 1024px) { .cover-error { font-size: 13px; padding: 10px 12px; border-radius: 8px; margin-bottom: 16px; } }
+
+    .cover-form { display: grid; gap: calc(14 * var(--u)); }
+    @media (min-width: 1024px) { .cover-form { gap: 14px; } }
+    .cover-field { display: grid; gap: calc(7 * var(--u)); }
+    .cover-field-label { font-weight: 600; font-size: calc(10 * var(--u)); letter-spacing: .14em; text-transform: uppercase; color: #c6d3df; }
+    @media (min-width: 1024px) { .cover-field-label { font-size: 10.5px; } }
+    .cover-input {
+      width: 100%; min-height: calc(46 * var(--u)); padding: 0 calc(14*var(--u));
+      border-radius: calc(9 * var(--u)); border: 1px solid rgba(155,184,225,.26);
+      background: rgba(4,7,13,.7); color: #fff; font: inherit; font-size: 16px;
+      transition: border-color .25s ease, box-shadow .25s ease;
+    }
+    @media (min-width: 1024px) { .cover-input { min-height: 46px; border-radius: 9px; padding: 0 14px; } }
+    .cover-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(155,184,225,.16); }
+    .cover-submit {
+      margin-top: calc(4 * var(--u)); min-height: calc(48 * var(--u)); border: 0; border-radius: calc(9 * var(--u)); cursor: pointer;
+      font: inherit; font-weight: 700; font-size: calc(13 * var(--u)); letter-spacing: .12em; text-transform: uppercase; color: #061018;
+      background: linear-gradient(135deg, #cfe0f4 0%, #9bb8e1 48%, #5f86b6 100%);
+      transition: filter .25s ease, transform .15s ease;
+    }
+    @media (min-width: 1024px) { .cover-submit { min-height: 48px; border-radius: 9px; font-size: 13px; } }
+    .cover-submit:hover { filter: brightness(1.07); }
+    .cover-submit:active { transform: translateY(1px); }
+
+    .cover-close { position: absolute; top: calc(14*var(--u)); right: calc(14*var(--u)); width: calc(30*var(--u)); height: calc(30*var(--u)); display: grid; place-items: center; border: 0; border-radius: 50%; background: rgba(255,255,255,.06); color: #c6d3df; font-size: calc(16*var(--u)); line-height: 1; cursor: pointer; }
+    .cover-close:hover { background: rgba(255,255,255,.12); color: #fff; }
+    @media (min-width: 1024px) { .cover-close { width: 30px; height: 30px; top: 14px; right: 14px; font-size: 16px; } }
+    /* In no-JS mode the close button has nothing to close — hide it. */
+    html:not(.js) .cover-close { display: none; }
+
+    @media (max-width: 1023px) {
+      .cover-hero { flex-direction: column; align-items: center; justify-content: flex-end; text-align: center; padding-bottom: calc(120 * var(--u)); }
+      .cover-hero-title { font-size: calc(36 * var(--u)); text-align: center; }
+      .cover-hero-cta { display: none; }
+      .cover-toggle { display: none; }
+      .cover-logo { left: calc(26 * var(--u)); top: calc(26 * var(--u)); }
+      .cover-topright { right: calc(26 * var(--u)); top: calc(28 * var(--u)); }
+      .cover-hint { top: auto; bottom: calc(46 * var(--u)); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .cover-hotspot::after { animation: none; }
+      .cover-fade, .js .cover-fade { transition-duration: .01ms; }
+    }
+  </style>
+</head>
+<body>
+  <div class="cover-root" id="cover-root">
+    <canvas class="cover-canvas" id="cover-canvas"></canvas>
+    <div class="cover-vignette"></div>
+
+    <!-- loading gate -->
+    <div class="cover-loader" id="cover-loader" aria-hidden="true">
+      <svg class="cover-loader-tri" viewBox="0 0 900 820" fill="none">
+        <path d="M450 40 L860 760 L40 760 Z"></path>
+        <path d="M450 200 L720 690 L180 690 Z"></path>
+      </svg>
+      <div class="cover-loader-title">CloudSpace</div>
+      <div class="cover-loader-bar"><i id="cover-bar-fill"></i></div>
+      <div class="cover-loader-status" id="cover-status">LOADING</div>
+      <div class="cover-loader-copy">沉浸式入口 · 点击水晶解锁<br>AN IMMERSIVE GATEWAY</div>
+    </div>
+
+    <!-- crystal click hotspot (positioned by JS over the glb) -->
+    <a class="cover-hotspot" id="cover-hotspot" href="#" role="button" aria-label="点击水晶解锁 / Unlock" data-cover-open></a>
+
+    <!-- chrome -->
+    <div class="cover-chrome">
+      <a class="cover-logo cover-fade d1" href="#" aria-label="CloudSpace" data-cover-open>
+        <svg class="cover-logo-mark" viewBox="0 0 42 41" fill="none">
+          <path d="M21 2 L40 38 L2 38 Z" stroke="#eee" stroke-width="1.4"></path>
+          <path d="M21 13 L30.5 31 L11.5 31 Z" stroke="#9bb8e1" stroke-width="1.1"></path>
+          <path d="M21 2 L21 13 M2 38 L11.5 31 M40 38 L30.5 31" stroke="#576676" stroke-width="1"></path>
+        </svg>
+        <span class="cover-logo-type"><b>CloudSpace</b><small>Private Gateway</small></span>
+      </a>
+
+      <div class="cover-topright cover-fade d1">
+        <button class="cover-toggle" id="cover-motion" type="button" aria-pressed="true">
+          动效 <b>ON</b>
+          <svg viewBox="0 0 24 8" fill="none" aria-hidden="true"><path d="M0 4 H5 L7 1 L10 7 L13 2 L16 6 L18 4 H24" stroke="currentColor" stroke-width="1"></path></svg>
+        </button>
+        <button class="cover-enter" type="button" data-cover-open>
+          解锁 <span class="cover-enter-arrow">&rarr;</span>
+        </button>
+      </div>
+
+      <div class="cover-hero">
+        <h1 class="cover-hero-title cover-fade d2">CloudSpace<span class="sub">你的私有云空间 — 点击水晶，输入密码进入。</span></h1>
+        <button class="cover-hero-cta cover-fade d3" type="button" data-cover-open>
+          <span class="cover-hero-cta-label">点击解锁<br>开始使用</span>
+          <span class="cover-hero-cta-line"></span>
+        </button>
+      </div>
+
+      <div class="cover-hint cover-fade d3">
+        <span class="zh">点击水晶解锁</span>CLICK THE CRYSTAL TO UNLOCK
+      </div>
+    </div>
+
+    <!-- password panel: real native POST form to the CloudSpace access lock -->
+    <div class="cover-panel" id="cover-panel" role="dialog" aria-modal="true" aria-label="解锁 CloudSpace">
+      <div class="cover-card">
+        <button class="cover-close" type="button" aria-label="关闭" data-cover-close>&times;</button>
+        <div class="cover-card-kicker">CloudSpace</div>
+        <h2 class="cover-card-title">解锁访问</h2>
+        <p class="cover-card-desc">输入访问密码以进入 CloudSpace。Enter the access password to continue.</p>
+        <p class="cover-error" id="cover-error">__CLOUDSPACE_MESSAGE__</p>
+        <form class="cover-form" method="post" action="/__lock/login">
+          <input type="hidden" name="next" value="__CLOUDSPACE_NEXT__">
+          <label class="cover-field">
+            <span class="cover-field-label">访问密码 · Access password</span>
+            <input class="cover-input" id="cover-password" name="password" type="password" autocomplete="current-password" autofocus required>
+          </label>
+          <button class="cover-submit" type="submit">解锁 Unlock</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script src="/cover/cover.bundle.js" defer></script>
+</body>
+</html>

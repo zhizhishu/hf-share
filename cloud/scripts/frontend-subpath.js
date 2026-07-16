@@ -83,7 +83,7 @@ function main() {
   // and anything already under the prefix (idempotency).
   const notDoneLA = `(?!/|${escapeRe(name)}/)`;
 
-  const stats = { html: 0, entryHelper: 0, cssUrl: 0, jsAsset: 0, manifest: 0, swDisabled: 0 };
+  const stats = { html: 0, base: 0, entryHelper: 0, cssUrl: 0, jsAsset: 0, manifest: 0, swDisabled: 0 };
   const files = walk(dir, []);
 
   for (const f of files) {
@@ -106,6 +106,23 @@ function main() {
       const re = new RegExp(`(\\b(?:src|href)=")/${notDoneLA}`, "g");
       s = s.replace(re, `$1${prefix}/`);
       stats.html += (s.match(new RegExp(`(?:src|href)="${escapeRe(prefix)}/`, "g")) || []).length;
+
+      // ---- SPA router base (history mode) ----
+      // Verified against the shipped dist: the app creates its router with `history:ue()`
+      // i.e. createWebHistory() called with NO base arg, so vue-router's normalizeBase falls
+      // back to reading `<base href>` from the document. Without a <base>, the router base is
+      // "/" and every history-mode route (/subs, /sync, ...) 404s when hosted at <prefix>/.
+      // Inject <base href="<prefix>/"> (trailing slash required for correct relative + router
+      // base resolution). All asset refs are root-absolute (<prefix>/...) so <base> does not
+      // disturb them; ES-module specifiers resolve against the module URL, not <base>.
+      if (/<base\s+href=/i.test(s)) {
+        // idempotent: normalize any existing <base href="..."> to the prefix
+        s = s.replace(/<base\s+href="[^"]*"\s*\/?>/i, `<base href="${prefix}/">`);
+        stats.base++;
+      } else if (/<head(\s[^>]*)?>/i.test(s)) {
+        s = s.replace(/(<head(?:\s[^>]*)?>)/i, `$1<base href="${prefix}/">`);
+        stats.base++;
+      }
     }
 
     if (ext === ".js" || ext === ".mjs") {
@@ -151,6 +168,10 @@ function main() {
     if (!h.includes(`src="${prefix}/index.js"`)) {
       errs.push(`index.html has no "${prefix}/index.js" entry ref (entry markup changed?)`);
     }
+    // Router base: the history-mode SPA 404s on /subs etc. without a prefixed <base href>.
+    if (!h.includes(`<base href="${prefix}/">`)) {
+      errs.push(`index.html has no <base href="${prefix}/"> (SPA router base missing — /subs will 404; <head> markup changed?)`);
+    }
   } else {
     errs.push("index.html not found in frontend dir");
   }
@@ -181,7 +202,7 @@ function main() {
   }
 
   console.log(
-    `[subpath] rewrites: html=${stats.html} entryHelper=${stats.entryHelper} cssUrl=${stats.cssUrl} ` +
+    `[subpath] rewrites: html=${stats.html} base=${stats.base} entryHelper=${stats.entryHelper} cssUrl=${stats.cssUrl} ` +
     `jsAsset=${stats.jsAsset} manifest=${stats.manifest} swDisabled=${stats.swDisabled}`
   );
 

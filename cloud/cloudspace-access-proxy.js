@@ -59,9 +59,12 @@ const healthCacheMs = positiveNumber(process.env.CLOUDSPACE_HEALTH_CACHE_MS, 100
 // at build time (scripts/frontend-subpath.js) because CSS/large-JS bodies are not transformed
 // here. Empty (default) = mounted at root, fully backward compatible.
 const mountPrefix = normalizeMountPrefix(process.env.CLOUDSPACE_MOUNT_PREFIX);
-// Under a sub-path mount the fancy ocean cover ships a 690KB bundle with hard-coded
-// /cover/assets paths; the plain (self-contained, inline-styled) lock screen is used instead.
-// Set CLOUDSPACE_COVER_ENABLED=false to force the plain lock regardless of cover assets.
+// Pre-login ocean/stone cover (石头海浪 Three.js unlock). The 690KB bundle + login.html
+// hard-code root-absolute /cover/ and /__lock/ paths; under a sub-path mount those are
+// rewritten to <mountPrefix>/... at serve time (renderCover / handleCoverRoute below), so
+// the cover works both at root and under /cloud. The gateway serves these bodies itself, so
+// unlike the proxied front-end (build-time frontend-subpath.js) no build step is needed.
+// Set CLOUDSPACE_COVER_ENABLED=false to force the plain (inline-styled) lock screen instead.
 const coverEnabled = process.env.CLOUDSPACE_COVER_ENABLED !== "false";
 
 // Stratus 全服务器版: 作为同容器内的独立 Koa 服务并存于 CloudSpace 网关之后。
@@ -357,16 +360,39 @@ const COVER_MIME = {
   ".svg": "image/svg+xml"
 };
 let coverTemplateCache = null;
+// Load login.html once, rewriting its root-absolute paths for the sub-path mount: the cover
+// bundle <script src="/cover/..."> and the password form action="/__lock/login" both live
+// under the mount prefix that claw forwards here (mirrors htmlPage's `base = mountPrefix`).
+// The hidden `next` value stays root-relative (the POST handler re-prefixes it via
+// withMountPrefix). No-op at root. Drift-detecting: a login.html that drops these anchors
+// warns loudly so an upstream cover change is caught instead of shipping a white screen.
+function loadCoverTemplate() {
+  if (coverTemplateCache != null) return coverTemplateCache;
+  let tpl = fs.readFileSync(path.join(COVER_DIR, "login.html"), "utf8");
+  if (mountPrefix) {
+    const hadCoverSrc = tpl.includes('src="/cover/');
+    const hadLockAction = tpl.includes('action="/__lock/');
+    tpl = tpl
+      .split('src="/cover/').join(`src="${mountPrefix}/cover/`)
+      .split('action="/__lock/').join(`action="${mountPrefix}/__lock/`);
+    if (!hadCoverSrc || !hadLockAction) {
+      console.warn(
+        `[CLOUDSPACE ACCESS] cover login.html sub-path anchors missing ` +
+        `(bundle src=${hadCoverSrc}, lock form action=${hadLockAction}); the ocean cover may ` +
+        `break under the "${mountPrefix}" mount — re-check cover/login.html paths.`
+      );
+    }
+  }
+  coverTemplateCache = tpl;
+  return coverTemplateCache;
+}
 // Returns the templated cover login HTML, or null if the cover assets are absent
 // (so callers can fall back to the plain htmlPage lock screen).
 function renderCover(message, next) {
-  // Under a sub-path mount (or when explicitly disabled) fall back to the plain lock
-  // screen: the fancy cover bundle hard-codes root-absolute /cover/assets paths.
   if (!coverEnabled) return null;
   let tpl;
   try {
-    if (coverTemplateCache == null) coverTemplateCache = fs.readFileSync(path.join(COVER_DIR, "login.html"), "utf8");
-    tpl = coverTemplateCache;
+    tpl = loadCoverTemplate();
   } catch (_) {
     return null;
   }
@@ -374,6 +400,33 @@ function renderCover(message, next) {
   return tpl
     .split("__CLOUDSPACE_NEXT__").join(escapeHtml(safeNext))
     .split("__CLOUDSPACE_MESSAGE__").join(escapeHtml(message || ""));
+}
+// The cover bundle hard-codes a single root-absolute ASSET_BASE ("/cover/assets") from which
+// every 3D asset URL (glb / waternormals / draco / basis) is derived. Under a sub-path mount
+// rewrite it to "<mountPrefix>/cover/assets" so those fetches resolve through the prefix claw
+// forwards here; cached after first read. It is the only text asset needing this — glb/jpg/
+// wasm are binary and served byte-for-byte. Drift-detecting: a missing anchor warns loudly.
+let coverBundleCache = null;
+function readCoverBundle(file, cb) {
+  if (coverBundleCache) { cb(null, coverBundleCache); return; }
+  fs.readFile(file, (err, buf) => {
+    if (err) { cb(err); return; }
+    let out = buf;
+    if (mountPrefix) {
+      const src = buf.toString("utf8");
+      const anchor = "/cover/assets";
+      if (src.includes(anchor)) {
+        out = Buffer.from(src.split(anchor).join(`${mountPrefix}${anchor}`), "utf8");
+      } else {
+        console.warn(
+          `[CLOUDSPACE ACCESS] cover.bundle.js ASSET_BASE anchor "${anchor}" not found; ` +
+          `the ocean cover's 3D assets may 404 under the "${mountPrefix}" mount — re-check cover.src.js.`
+        );
+      }
+    }
+    coverBundleCache = out;
+    cb(null, out);
+  });
 }
 // Serve /cover/* publicly: the bundle + assets are fetched before the visitor is
 // authenticated. login.html is NEVER served here — it only goes out templated via
@@ -387,7 +440,7 @@ function handleCoverRoute(req, res) {
   if (!rel || rel.includes("\0") || rel.endsWith("login.html")) { res.writeHead(404); res.end(); return true; }
   const file = path.normalize(path.join(COVER_DIR, rel));
   if (file !== COVER_DIR && !file.startsWith(COVER_DIR + path.sep)) { res.writeHead(403); res.end(); return true; }
-  fs.readFile(file, (err, buf) => {
+  const send = (err, buf) => {
     if (err) { res.writeHead(404); res.end(); return; }
     res.writeHead(200, {
       "content-type": COVER_MIME[path.extname(file).toLowerCase()] || "application/octet-stream",
@@ -395,7 +448,10 @@ function handleCoverRoute(req, res) {
     });
     if (req.method === "HEAD") { res.end(); return; }
     res.end(buf);
-  });
+  };
+  // cover.bundle.js needs the sub-path ASSET_BASE rewrite; everything else is served as-is.
+  if (path.basename(file) === "cover.bundle.js") readCoverBundle(file, send);
+  else fs.readFile(file, send);
   return true;
 }
 

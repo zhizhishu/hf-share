@@ -179,6 +179,11 @@ COPY cloud/cloudspace-access-proxy.js /opt/app/cloudspace-access-proxy.js
 COPY cloud/cloudspace-state.js /opt/app/cloudspace-state.js
 COPY cloud/cloudspace-log-filter.js /opt/app/cloudspace-log-filter.js
 COPY cloud/start.sh /opt/app/start.sh
+# 登录前海洋石头解锁封面(石头海浪 Three.js): login.html + cover.bundle.js + assets/。
+# 网关 handleCoverRoute 从 __dirname/cover(=/opt/app/cover) 读静态资源, renderCover 模板化 login.html。
+# 子路径挂载(/cloud)下资源路径由网关运行期按 CLOUDSPACE_MOUNT_PREFIX 重写(见 access-proxy 的
+# renderCover / handleCoverRoute), 无需 build 期改写。运行期开关 CLOUDSPACE_COVER_ENABLED。
+COPY cloud/cover /opt/app/cover
 RUN mkdir -p /opt/app/data \
     && chmod +x /opt/app/http-meta/meta/http-meta /opt/app/start.sh \
     && /opt/app/http-meta/meta/http-meta -v \
