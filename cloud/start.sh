@@ -259,13 +259,15 @@ validate_cloudspace_storage_file() {
 
 restore_from_supabase() {
   [ "${SUPABASE_RESTORE_ON_START:-true}" = "true" ] || return 0
-  wait_for_cloudspace_core || return 0
-  # 诊断：探明 core 直连各端点响应码(带 backend path vs 不带)，一次重装即从日志定位 restore POST 该走哪条路。
-  for _u in "/api/utils/env" "/api/storage" "/api/subs"; do
-    _c1=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 --max-time 5 "http://127.0.0.1:${CLOUDSPACE_BACKEND_API_PORT}${CLOUDSPACE_BACKEND_PATH}${_u}" 2>/dev/null)
-    _c2=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 --max-time 5 "http://127.0.0.1:${CLOUDSPACE_BACKEND_API_PORT}${_u}" 2>/dev/null)
-    echo "[restore-diag] withpath ${CLOUDSPACE_BACKEND_PATH}${_u}=${_c1} | nopath ${_u}=${_c2}" >&2
+  # 诊断先行(wait 之前无条件跑)：给 core 20s 起步后，探明 wait 的 curl 为何一直探不通——
+  # 打印 5 个候选 URL 各自的响应码/耗时/curl 退出码 + 4 个关键变量实际值，一次重装即定铁证。
+  sleep 20
+  echo "[restore-diag] INTERNAL_API_BASE=${CLOUDSPACE_INTERNAL_API_BASE} PORT=${CLOUDSPACE_BACKEND_API_PORT} PATH=${CLOUDSPACE_BACKEND_PATH} UPSTREAM=${CLOUDSPACE_UPSTREAM_PORT}" >&2
+  for _url in "${CLOUDSPACE_INTERNAL_API_BASE}/api/utils/env" "http://127.0.0.1:${CLOUDSPACE_BACKEND_API_PORT}/api/utils/env" "http://127.0.0.1:${CLOUDSPACE_BACKEND_API_PORT}/" "http://127.0.0.1:3200${CLOUDSPACE_BACKEND_PATH}/api/utils/env" "http://127.0.0.1:3200/api/utils/env"; do
+    _out=$(curl -s -o /dev/null -w "code=%{http_code} time=%{time_total}s" --connect-timeout 3 --max-time 8 "$_url" 2>&1); _ec=$?
+    echo "[restore-diag] ${_url} -> ${_out} exit=${_ec}" >&2
   done
+  wait_for_cloudspace_core || return 0
   ensure_supabase_bucket || return 0
 
   tmp_state="/tmp/cloudspace-supabase-state.json"
