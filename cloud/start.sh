@@ -238,7 +238,10 @@ wait_for_cloudspace_core() {
   timeout="${CLOUDSPACE_BACKUP_WAIT_SECONDS:-600}"
   i=0
   while [ "$i" -lt "$timeout" ]; do
-    if curl -fsS --connect-timeout 2 --max-time 5 "${CLOUDSPACE_INTERNAL_API_BASE}/api/utils/env" >/dev/null 2>&1; then
+    # 首选健康端点 2xx；fallback：core 端口有任何 HTTP 响应即视为就绪(listening 即可)。
+    # 避开 /api/utils/env 内部直连持续探不通的老坑——实证 core 早就绪能查订阅、旧判据却 600s 超时。
+    if curl -fsS --connect-timeout 2 --max-time 5 "${CLOUDSPACE_INTERNAL_API_BASE}/api/utils/env" >/dev/null 2>&1 \
+       || curl -s -o /dev/null --connect-timeout 2 --max-time 5 "http://127.0.0.1:${CLOUDSPACE_BACKEND_API_PORT}/" 2>/dev/null; then
       return 0
     fi
     i=$((i + 1))
@@ -257,6 +260,12 @@ validate_cloudspace_storage_file() {
 restore_from_supabase() {
   [ "${SUPABASE_RESTORE_ON_START:-true}" = "true" ] || return 0
   wait_for_cloudspace_core || return 0
+  # 诊断：探明 core 直连各端点响应码(带 backend path vs 不带)，一次重装即从日志定位 restore POST 该走哪条路。
+  for _u in "/api/utils/env" "/api/storage" "/api/subs"; do
+    _c1=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 --max-time 5 "http://127.0.0.1:${CLOUDSPACE_BACKEND_API_PORT}${CLOUDSPACE_BACKEND_PATH}${_u}" 2>/dev/null)
+    _c2=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 --max-time 5 "http://127.0.0.1:${CLOUDSPACE_BACKEND_API_PORT}${_u}" 2>/dev/null)
+    echo "[restore-diag] withpath ${CLOUDSPACE_BACKEND_PATH}${_u}=${_c1} | nopath ${_u}=${_c2}" >&2
+  done
   ensure_supabase_bucket || return 0
 
   tmp_state="/tmp/cloudspace-supabase-state.json"
