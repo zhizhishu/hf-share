@@ -248,9 +248,7 @@ if [ "${MOUNT_SUBSTORE:-}" = "on" ] || [ "${MOUNT_SUBSTORE:-}" = "true" ] || [ "
       sleep 15
     done
   ) &
-  CLOUDSPACE_SUPERVISOR_PID="$!"
-  pids="$pids $CLOUDSPACE_SUPERVISOR_PID"
-  echo "[fusionsearch] cloudspace(订阅栈) 自重启后台已拉起(pid=$CLOUDSPACE_SUPERVISOR_PID, 纳入主监控——内部 /opt/app/start.sh 挂了仍由本层 while 自重启、不拖垮搜索/邮箱；唯有这层守护本身死掉才触发整体重启，避免 /cloud 静默下线无人知)"
+  echo "[fusionsearch] cloudspace(订阅栈) 自重启后台已拉起(独立于搜索/邮箱，挂了不拖垮)"
 else
   echo "[fusionsearch] MOUNT_SUBSTORE 未开，跳过 cloudspace 订阅栈(fusion 独立模式)"
 fi

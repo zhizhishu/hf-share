@@ -177,12 +177,13 @@ function validateStorage(storageFile, minBytes = 0) {
   if (!hasMeaningfulValue(value)) {
     throw new Error("CloudSpace storage does not contain meaningful data");
   }
-  // 结构校验：必须像真订阅 storage（顶层有 subs 或 collections 数组），挡住 core 抽风时返回的
-  // HTTP 200 错误 JSON（如 {error:..., detail:...}）被当好数据备份、覆盖 Supabase 里的好备份。
-  // 用户主动清空订阅时 subs 仍是空数组 []（Array）、照样通过，不误伤。
+  // 结构校验：真订阅 storage 顶层必有 subs 数组 + settings 非空对象。堵住 core 抽风返回的
+  // HTTP 200 错误 JSON——含恰好带空数组的 {error:...,collections:[]}（它没有 subs+settings，
+  // 旧的"subs 或 collections 二选一"校验会被它绕过）。用户清空订阅时 subs 是空数组 []、settings 仍在，照样通过、不误伤。
   if (!value || typeof value !== "object" || Array.isArray(value)
-      || (!Array.isArray(value.subs) && !Array.isArray(value.collections))) {
-    throw new Error("CloudSpace storage lacks expected subs/collections arrays");
+      || !Array.isArray(value.subs)
+      || typeof value.settings !== "object" || value.settings === null || Array.isArray(value.settings)) {
+    throw new Error("CloudSpace storage lacks expected subs array / settings object");
   }
   console.log(`Validated CloudSpace storage (${stat.size} bytes)`);
 }
