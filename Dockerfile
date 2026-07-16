@@ -24,8 +24,9 @@ FROM node:22-bookworm-slim AS claw-builder
 WORKDIR /claw
 # better-sqlite3 原生模块编译依赖（与 clawemail 原 Dockerfile 一致，已验证可行）
 ARG CLAWEMAIL_REF=main
+# ca-certificates 必装：node:22-bookworm-slim 默认无 CA 证书，git clone HTTPS 会 CAfile:none 验证失败
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends python3 make g++ git \
+    && apt-get install -y --no-install-recommends python3 make g++ git ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 # clone-at-build：clawemail 唯一真源 = zhizhishu/ClawEmail（不再 vendored mail/ 拷贝）
 RUN git clone --depth 1 --branch "${CLAWEMAIL_REF}" \
