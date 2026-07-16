@@ -1,0 +1,74 @@
+name: Smoke Test (docker run 三入口)
+
+# 云端冒烟测: 拉 GHCR 镜像在 CI 里真跑起来, 轮询三入口连通性。
+# 完全不碰 HF —— 目的是"上 HF 前先在干净 Linux 里验证镜像能起 + 路由通",
+# 避免在 HF 上反复试错触发 abusive flag。
+on:
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pull GHCR image (public, 匿名可拉)
+        run: docker pull ghcr.io/${{ github.repository }}:latest
+
+      - name: Run container (三合一, MOUNT_MAIL/MOUNT_SUBSTORE=on, 不接 Supabase)
+        run: |
+          docker run -d --name claw \
+            -p 3000:3000 \
+            -e PORT=3000 \
+            -e MOUNT_MAIL=on \
+            -e MOUNT_SUBSTORE=on \
+            -e HTTP_META_NODE_MAX_OLD_SPACE_SIZE=512 \
+            -e CLOUDSPACE_CORE_NODE_MAX_OLD_SPACE_SIZE=512 \
+            ghcr.io/${{ github.repository }}:latest
+          echo "container started"
+
+      - name: Probe 三入口 (轮询最多 ~240s)
+        run: |
+          set +e
+          BASE=http://127.0.0.1:3000
+          ok_root=""; ok_email=""; ok_cloud=""
+          for i in $(seq 1 80); do
+            sleep 3
+            # 容器还活着?  退出即致命(镜像起不来)
+            if ! docker ps --format '{{.Names}}' | grep -q '^claw$'; then
+              echo "::error::容器在第 ${i} 轮已退出 (镜像起不来)"
+              echo "=== 退出码 ==="; docker inspect claw --format '{{.State.ExitCode}}' 2>/dev/null
+              echo "=== 日志尾 ==="; docker logs claw 2>&1 | tail -80
+              exit 1
+            fi
+            code_root=$(curl -s -o /tmp/root.html -w '%{http_code}' -H 'Accept: text/html' "$BASE/" 2>/dev/null)
+            code_email=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/email/" 2>/dev/null)
+            code_cloud=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/cloud/" 2>/dev/null)
+            echo "[${i}] / =${code_root}  /email/ =${code_email}  /cloud/ =${code_cloud}"
+            # 判据: / 必须 200+HTML(海洋入口); email/cloud 只要不是 网关级失败(000/502/503/504)
+            # 即视为反代目标已起来(锁屏页 200 / 登录页 200 / 重定向 3xx / 401 / 404 都算通)
+            [ "$code_root" = "200" ] && ok_root=1
+            case "$code_email" in 000|502|503|504) ;; *) [ -n "$code_email" ] && ok_email=1;; esac
+            case "$code_cloud" in 000|502|503|504) ;; *) [ -n "$code_cloud" ] && ok_cloud=1;; esac
+            if [ -n "$ok_root" ] && [ -n "$ok_email" ] && [ -n "$ok_cloud" ]; then
+              echo "✓✓ 三入口全通 (第 ${i} 轮)"
+              break
+            fi
+          done
+          echo "=================== 判定 ==================="
+          echo "  / (海洋入口)  : ${ok_root:-FAIL}"
+          echo "  /email/ (邮箱): ${ok_email:-FAIL}"
+          echo "  /cloud/ (订阅): ${ok_cloud:-FAIL}"
+          echo "=== / 响应首 400 字节 ==="
+          head -c 400 /tmp/root.html 2>/dev/null; echo
+          if [ -n "$ok_root" ] && [ -n "$ok_email" ] && [ -n "$ok_cloud" ]; then
+            echo "::notice::✓ 云端 smoke test 通过, 镜像可上 HF"
+            exit 0
+          else
+            echo "::error::✗ 三入口未全通"
+            exit 1
+          fi
+
+      - name: Container logs (always)
+        if: always()
+        run: |
+          echo "=== 完整容器日志 ==="
+          docker logs claw 2>&1 | tail -200 || true
