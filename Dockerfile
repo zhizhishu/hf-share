@@ -28,6 +28,8 @@ ARG CLAWEMAIL_REF=main
 RUN apt-get update \
     && apt-get install -y --no-install-recommends python3 make g++ git ca-certificates \
     && rm -rf /var/lib/apt/lists/*
+# cache-bust：同 fusion-src，commits API 使 ClawEmail 源码更新时下方 clone 层必重拉。
+ADD https://api.github.com/repos/zhizhishu/ClawEmail/commits/${CLAWEMAIL_REF} /tmp/.clawemail-ref.json
 # clone-at-build：clawemail 唯一真源 = zhizhishu/ClawEmail（不再 vendored mail/ 拷贝）
 RUN git clone --depth 1 --branch "${CLAWEMAIL_REF}" \
         https://github.com/zhizhishu/ClawEmail.git . \
@@ -132,6 +134,10 @@ RUN rm -rf modules assets README.md Dockerfile dockerignore .gitignore \
 FROM alpine/git AS fusion-src
 ARG FUSION_REF=main
 WORKDIR /fusion
+# cache-bust：commits API 响应体随 ${FUSION_REF} 最新 commit 变化，使下方 clone 层在源码
+# 更新时必定失效重拉。否则 `git clone ... main` 指令字符串恒定，Docker layer cache 会把
+# clone 锁死在旧 commit —— push 了新代码，build 却仍用旧源码（实测踩坑：三入口路由不更新）。
+ADD https://api.github.com/repos/zhizhishu/fusionsearch-mcp/commits/${FUSION_REF} /tmp/.fusion-ref.json
 RUN git clone --depth 1 --branch "${FUSION_REF}" \
         https://github.com/zhizhishu/fusionsearch-mcp.git . \
     && rm -rf .git
