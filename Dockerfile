@@ -19,7 +19,7 @@
 # ---- node 22 runtime 二进制来源（glibc/bookworm） ----
 FROM node:22-bookworm-slim AS node-runtime
 
-# ---- clawemail builder：编 better-sqlite3(node22 ABI) + vite build(base=/email) ----
+# ---- clawemail builder：编 better-sqlite3(node22 ABI) + vite build(base=/clawemail) ----
 FROM node:22-bookworm-slim AS claw-builder
 WORKDIR /claw
 # better-sqlite3 原生模块编译依赖（与 clawemail 原 Dockerfile 一致，已验证可行）
@@ -32,9 +32,9 @@ RUN apt-get update \
 RUN git clone --depth 1 --branch "${CLAWEMAIL_REF}" \
         https://github.com/zhizhishu/ClawEmail.git . \
     && npm ci
-# VITE_API_BASE=/email：vite base 让静态资源引用带 /email 前缀，同时前端 API/SSE/附件
-# 全走 /email（api.ts 的 API_BASE 读同一个 VITE_API_BASE）。esbuild 后端 bundle 一并产出。
-RUN VITE_API_BASE=/email npm run build
+# VITE_API_BASE=/clawemail：vite base 让静态资源引用带 /clawemail 前缀，同时前端 API/SSE/附件
+# 全走 /clawemail（api.ts 的 API_BASE 读同一个 VITE_API_BASE）。esbuild 后端 bundle 一并产出。
+RUN VITE_API_BASE=/clawemail npm run build
 # 只留生产依赖（含已编译好的 better-sqlite3 原生模块）
 RUN npm prune --omit=dev
 
@@ -46,14 +46,14 @@ RUN npm prune --omit=dev
 # 运行期日志过滤(cloudspace-log-filter.js) + 网关注入(access-proxy) 两层在运行时生效。
 # 产物全部落在 /opt/app（与 cloudspace 原生布局一致，避免改它硬编码的绝对路径），
 # 与 claw 自身的 /app 互不相干。build 时下载 core/frontend/mihomo/scripthub 四源，
-# 洗白后与 claw 的运行时文件一起进最终镜像；claw 网关反代 /cloud → 网关内部 7861。
+# 洗白后与 claw 的运行时文件一起进最终镜像；claw 网关反代 /cloudspace → 网关内部 7861。
 # ============================================================================
 
 # ---- Nebula(前端) + Cumulus(底核): 取 release 产物 → rebrand 洗白 → 子路径 re-host ----
 FROM node:20-alpine AS cloud-fetcher
 ARG HTTP_META_VERSION=1.1.0
 # 前端子路径挂载前缀（须与运行期 CLOUDSPACE_MOUNT_PREFIX 一致；见 deploy/hf-allinone/start.sh）。
-ARG CLOUDSPACE_MOUNT_SUBPATH=/cloud
+ARG CLOUDSPACE_MOUNT_SUBPATH=/cloudspace
 RUN apk add --no-cache ca-certificates curl unzip
 WORKDIR /opt/app
 RUN mkdir -p /opt/app/frontend /opt/app/data \
@@ -203,7 +203,7 @@ COPY cloud/cloudspace-log-filter.js /opt/app/cloudspace-log-filter.js
 COPY cloud/start.sh /opt/app/start.sh
 # 登录前海洋石头解锁封面(石头海浪 Three.js): login.html + cover.bundle.js + assets/。
 # 网关 handleCoverRoute 从 __dirname/cover(=/opt/app/cover) 读静态资源, renderCover 模板化 login.html。
-# 子路径挂载(/cloud)下资源路径由网关运行期按 CLOUDSPACE_MOUNT_PREFIX 重写(见 access-proxy 的
+# 子路径挂载(/cloudspace)下资源路径由网关运行期按 CLOUDSPACE_MOUNT_PREFIX 重写(见 access-proxy 的
 # renderCover / handleCoverRoute), 无需 build 期改写。运行期开关 CLOUDSPACE_COVER_ENABLED。
 COPY cloud/cover /opt/app/cover
 RUN mkdir -p /opt/app/data \
@@ -212,8 +212,8 @@ RUN mkdir -p /opt/app/data \
     && rm -f /opt/app/scripts/rebrand.js /opt/app/scripts/frontend-subpath.js
 
 # 对外端口 = clawemail Space 原 app_port 3000（fusion node 监听；HF 会注入 PORT=3000）。
-# 容器内：fusion node :3000(对外) / clawemail :3100(内部,MOUNT_MAIL=on 反代 /email) /
-#   CloudSpace 网关 :7861(内部,MOUNT_SUBSTORE=on 反代 /cloud) / core :3200 /
+# 容器内：fusion node :3000(对外) / clawemail :3100(内部,MOUNT_MAIL=on 反代 /clawemail) /
+#   CloudSpace 网关 :7861(内部,MOUNT_SUBSTORE=on 反代 /cloudspace) / core :3200 /
 #   Cirrus(http-meta) :9876 / Stratus :9100+9101 / SearXNG :8080 / search2api :8000 / pplx :8001。
 EXPOSE 3000
 

@@ -210,7 +210,7 @@
     </div>
 
     <!-- 三个入口热点(JS 每帧投影到对应 3D 锚点上;左海=邮箱 中=云 右海=搜索) -->
-    <a class="cover-hotspot" id="hotspot-email"  href="/email/" role="button" aria-label="邮箱 Email"></a>
+    <a class="cover-hotspot" id="hotspot-email"  href="/clawemail/" role="button" aria-label="邮箱 Email"></a>
     <a class="cover-hotspot" id="hotspot-cloud"  href="#" role="button" aria-label="云空间 CloudSpace"></a>
     <a class="cover-hotspot" id="hotspot-fusion" href="#" role="button" aria-label="搜索 FusionSearch"></a>
 
@@ -251,6 +251,9 @@
     <!-- 三入口直接跳转到各自服务,不在此页收密码(各服务原生登录) -->
   </div>
 
+  <!-- 统一前缀契约覆盖(须在 cover.bundle.js 之前)：三热点跳转从默认 /email/ /cloud/ /admin
+       改写到 /clawemail/ /cloudspace/ /fusionsearch-mcp（cover.src.js 读 window.__ENTRY_*__ 覆盖钩子）。 -->
+  <script>window.__ENTRY_EMAIL__='/clawemail/'; window.__ENTRY_CLOUD__='/cloudspace/'; window.__ENTRY_FUSION__='/fusionsearch-mcp';</script>
   <script src="/entry/cover.bundle.js" defer></script>
 </body>
 </html>

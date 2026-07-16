@@ -1287,6 +1287,13 @@ function applyCacheHeaders(headers, cacheControl) {
 
 function responseHeaders(req, upstreamRes, options = {}) {
   const headers = { ...upstreamRes.headers };
+  // Strip upstream engine identity headers (Server / X-Powered-By) so an
+  // engine's own fingerprint never leaks past the brand-defense layer,
+  // whatever the key casing the upstream used.
+  for (const key of Object.keys(headers)) {
+    const lower = key.toLowerCase();
+    if (lower === "x-powered-by" || lower === "server") delete headers[key];
+  }
   if (options.dropContentLength) delete headers["content-length"];
   if (options.frontend) applyCacheHeaders(headers, frontendCacheControl);
   if (isApiPath(req.url)) applyCacheHeaders(headers, apiCacheControl);

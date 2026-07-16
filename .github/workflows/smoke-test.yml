@@ -29,7 +29,7 @@ jobs:
         run: |
           set +e
           BASE=http://127.0.0.1:3000
-          ok_root=""; ok_email=""; ok_cloud=""
+          ok_root=""; ok_email=""; ok_cloud=""; ok_fusion=""
           for i in $(seq 1 80); do
             sleep 3
             # 容器还活着?  退出即致命(镜像起不来)
@@ -40,26 +40,29 @@ jobs:
               exit 1
             fi
             code_root=$(curl -s -o /tmp/root.html -w '%{http_code}' -H 'Accept: text/html' "$BASE/" 2>/dev/null)
-            code_email=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/email/" 2>/dev/null)
-            code_cloud=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/cloud/" 2>/dev/null)
-            echo "[${i}] / =${code_root}  /email/ =${code_email}  /cloud/ =${code_cloud}"
-            # 判据: / 必须 200+HTML(海洋入口); email/cloud 只要不是 网关级失败(000/502/503/504)
-            # 即视为反代目标已起来(锁屏页 200 / 登录页 200 / 重定向 3xx / 401 / 404 都算通)
+            code_email=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/clawemail/" 2>/dev/null)
+            code_cloud=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/cloudspace/" 2>/dev/null)
+            code_fusion=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/fusionsearch-mcp" 2>/dev/null)
+            echo "[${i}] / =${code_root}  /clawemail/ =${code_email}  /cloudspace/ =${code_cloud}  /fusionsearch-mcp =${code_fusion}"
+            # 判据: / 必须 200+HTML(海洋入口); clawemail/cloudspace/fusionsearch-mcp 只要不是 网关级失败(000/502/503/504)
+            # 即视为反代目标已起来(锁屏页 200 / 登录页 200 / 封面 200 / 重定向 3xx / 401 / 404 都算通)
             [ "$code_root" = "200" ] && ok_root=1
             case "$code_email" in 000|502|503|504) ;; *) [ -n "$code_email" ] && ok_email=1;; esac
             case "$code_cloud" in 000|502|503|504) ;; *) [ -n "$code_cloud" ] && ok_cloud=1;; esac
-            if [ -n "$ok_root" ] && [ -n "$ok_email" ] && [ -n "$ok_cloud" ]; then
+            case "$code_fusion" in 000|502|503|504) ;; *) [ -n "$code_fusion" ] && ok_fusion=1;; esac
+            if [ -n "$ok_root" ] && [ -n "$ok_email" ] && [ -n "$ok_cloud" ] && [ -n "$ok_fusion" ]; then
               echo "✓✓ 三入口全通 (第 ${i} 轮)"
               break
             fi
           done
           echo "=================== 判定 ==================="
-          echo "  / (海洋入口)  : ${ok_root:-FAIL}"
-          echo "  /email/ (邮箱): ${ok_email:-FAIL}"
-          echo "  /cloud/ (订阅): ${ok_cloud:-FAIL}"
+          echo "  / (海洋入口)          : ${ok_root:-FAIL}"
+          echo "  /clawemail/ (邮箱)     : ${ok_email:-FAIL}"
+          echo "  /cloudspace/ (订阅)    : ${ok_cloud:-FAIL}"
+          echo "  /fusionsearch-mcp (搜索): ${ok_fusion:-FAIL}"
           echo "=== / 响应首 400 字节 ==="
           head -c 400 /tmp/root.html 2>/dev/null; echo
-          if [ -n "$ok_root" ] && [ -n "$ok_email" ] && [ -n "$ok_cloud" ]; then
+          if [ -n "$ok_root" ] && [ -n "$ok_email" ] && [ -n "$ok_cloud" ] && [ -n "$ok_fusion" ]; then
             echo "::notice::✓ 云端 smoke test 通过, 镜像可上 HF"
             exit 0
           else
