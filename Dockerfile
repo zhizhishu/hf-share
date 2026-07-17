@@ -76,7 +76,7 @@ RUN mkdir -p /opt/app/frontend /opt/app/data \
     && /opt/app/bin/curl --version | head -1
 
 # 构建期洗白（Cumulus 底核 + Nebula 前端）：见 scripts/rebrand.js。品牌漂移会 FAIL 构建。
-COPY cloud/scripts/rebrand.js /opt/app/scripts/rebrand.js
+COPY --from=cloud-src /cloudspace/scripts/rebrand.js /opt/app/scripts/rebrand.js
 RUN node /opt/app/scripts/rebrand.js \
       --core /opt/app/cloudspace-core.bundle.js \
       --frontend /opt/app/frontend
@@ -84,7 +84,7 @@ RUN node /opt/app/scripts/rebrand.js \
 # 子路径 re-host：把前端 dist 里根绝对的静态资源路径(/index.js、/chunks、/css、/fonts、
 # /images、icons、manifest)改写到 ${CLOUDSPACE_MOUNT_SUBPATH}/ 前缀下，并停用 PWA SW。
 # 前端 API 走 hostAPI 同源基址(网关 bootstrap 注入)，不在此改写。anchor 漂移会 FAIL 构建。
-COPY cloud/scripts/frontend-subpath.js /opt/app/scripts/frontend-subpath.js
+COPY --from=cloud-src /cloudspace/scripts/frontend-subpath.js /opt/app/scripts/frontend-subpath.js
 RUN node /opt/app/scripts/frontend-subpath.js --frontend /opt/app/frontend --prefix "${CLOUDSPACE_MOUNT_SUBPATH}"
 
 RUN mkdir -p /opt/app/http-meta/meta \
@@ -102,7 +102,7 @@ RUN apk add --no-cache git bash grep
 WORKDIR /src
 RUN git clone --depth 1 --branch "${CIRRUS_UPSTREAM_TAG}" \
         https://github.com/MetaCubeX/mihomo.git .
-COPY cloud/scripts/cirrus-rename.sh /src/scripts/cirrus-rename.sh
+COPY --from=cloud-src /cloudspace/scripts/cirrus-rename.sh /src/scripts/cirrus-rename.sh
 RUN bash /src/scripts/cirrus-rename.sh
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v1 \
     go build -tags with_gvisor -trimpath \
@@ -121,13 +121,25 @@ RUN git clone --depth 1 --branch "${SCRIPTHUB_REF}" https://github.com/Script-Hu
     && corepack prepare pnpm@9.1.0 --activate \
     && pnpm install --prod --no-frozen-lockfile \
     && rm -rf .git
-COPY cloud/scripts/rebrand.js /tmp/rebrand.js
+COPY --from=cloud-src /cloudspace/scripts/rebrand.js /tmp/rebrand.js
 RUN rm -rf modules assets README.md Dockerfile dockerignore .gitignore \
         .prettierignore .prettierrc.js .nvmrc .vscode preview.js \
         ignored-build-step.js SurgeModuleTool.js SurgeModuleTool_macOS.js scripts \
         pnpm-lock.yaml node_modules/script-hub node_modules/.pnpm/script-hub@file* \
     && node /tmp/rebrand.js --scripthub /opt/app/scripthub \
     && rm -f /tmp/rebrand.js
+
+# ---- cloud-src：clone zhizhishu/cloudspace（CloudSpace 订阅栈唯一真源，不再 vendored 在 claw 仓 cloud/）----
+# 与 fusion-src / claw-builder 同一套 clone-at-build 模式：脚本(rebrand/frontend-subpath/
+# cirrus-rename)+网关注入层(access-proxy/state/log-filter)+start.sh+cover 全从这里取。
+FROM alpine/git AS cloud-src
+ARG CLOUDSPACE_REF=main
+WORKDIR /cloudspace
+# cache-bust: commits API 随最新 commit 变、使下方 clone 层失效重拉（防 layer cache 锁死旧代码）
+ADD https://api.github.com/repos/zhizhishu/cloudspace/commits/${CLOUDSPACE_REF} /tmp/.cloudspace-ref.json
+RUN git clone --depth 1 --branch "${CLOUDSPACE_REF}" \
+        https://github.com/zhizhishu/cloudspace.git . \
+    && rm -rf .git
 
 # ---- 最终 all-in-one：libregroup/libresearch (Void Linux glibc) ----
 # ---- fusion 源：clone fusionsearch-mcp（唯一真源，不再 vendored 在 claw 仓根）----
@@ -203,15 +215,15 @@ COPY --from=cloud-cirrus-builder /out/http-meta /opt/app/http-meta/meta/http-met
 # Stratus(Script-Hub) 装好依赖 + 洗白后的整目录。
 COPY --from=cloud-scripthub /opt/app/scripthub /opt/app/scripthub
 # 网关注入层(access-proxy，含子路径挂载改造) + 状态/日志过滤 + supervisor。
-COPY cloud/cloudspace-access-proxy.js /opt/app/cloudspace-access-proxy.js
-COPY cloud/cloudspace-state.js /opt/app/cloudspace-state.js
-COPY cloud/cloudspace-log-filter.js /opt/app/cloudspace-log-filter.js
-COPY cloud/start.sh /opt/app/start.sh
+COPY --from=cloud-src /cloudspace/cloudspace-access-proxy.js /opt/app/cloudspace-access-proxy.js
+COPY --from=cloud-src /cloudspace/cloudspace-state.js /opt/app/cloudspace-state.js
+COPY --from=cloud-src /cloudspace/cloudspace-log-filter.js /opt/app/cloudspace-log-filter.js
+COPY --from=cloud-src /cloudspace/start.sh /opt/app/start.sh
 # 登录前海洋石头解锁封面(石头海浪 Three.js): login.html + cover.bundle.js + assets/。
 # 网关 handleCoverRoute 从 __dirname/cover(=/opt/app/cover) 读静态资源, renderCover 模板化 login.html。
 # 子路径挂载(/cloudspace)下资源路径由网关运行期按 CLOUDSPACE_MOUNT_PREFIX 重写(见 access-proxy 的
 # renderCover / handleCoverRoute), 无需 build 期改写。运行期开关 CLOUDSPACE_COVER_ENABLED。
-COPY cloud/cover /opt/app/cover
+COPY --from=cloud-src /cloudspace/cover /opt/app/cover
 RUN mkdir -p /opt/app/data \
     && chmod +x /opt/app/http-meta/meta/http-meta /opt/app/start.sh \
     && /opt/app/http-meta/meta/http-meta -v \
