@@ -199,12 +199,9 @@ COPY --from=fusion-src /fusion/public ./public
 COPY --from=fusion-src /fusion/services ./services
 COPY --from=fusion-src /fusion/deploy ./deploy
 COPY public/entry ./public/entry
-# entry/assets 的 glb/海面/wasm 在 git 里是 LFS 指针(131字节,checkout 因 LFS 配额拉不下真文件)。
-# 从 GitHub LFS media 端点直接 ADD 真文件覆盖，彻底绕开 git LFS + Actions checkout。
-ADD https://media.githubusercontent.com/media/zhizhishu/hf-share/main/public/entry/assets/intro_compressed.glb ./public/entry/assets/intro_compressed.glb
-ADD https://media.githubusercontent.com/media/zhizhishu/hf-share/main/public/entry/assets/waternormals.jpg ./public/entry/assets/waternormals.jpg
-ADD https://media.githubusercontent.com/media/zhizhishu/hf-share/main/public/entry/assets/draco/draco_decoder.wasm ./public/entry/assets/draco/draco_decoder.wasm
-ADD https://media.githubusercontent.com/media/zhizhishu/hf-share/main/public/entry/assets/basis/basis_transcoder.wasm ./public/entry/assets/basis/basis_transcoder.wasm
+# entry/assets(glb/海面/wasm) 已是 git 普通 blob(commit d037a34 从 LFS 转, 均 <10MB HF 不 auto-LFS),
+# 上面 COPY public/entry 已带真文件; 勿再从 GitHub media 端点 ADD 覆盖 —— 私有库该端点返回 131 字节
+# LFS 指针会把真文件毁成坏指针(石头/海面不渲染的根因, 2026-07-17 移除)。
 
 # clawemail 构建产物（dist + 生产 node_modules 含 better-sqlite3 原生模块）→ /app/mail
 COPY --from=claw-builder /claw/dist /app/mail/dist
