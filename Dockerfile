@@ -51,6 +51,20 @@ RUN npm prune --omit=dev
 # 洗白后与 claw 的运行时文件一起进最终镜像；claw 网关反代 /cloudspace → 网关内部 7861。
 # ============================================================================
 
+# ---- cloud-src：clone zhizhishu/cloudspace（CloudSpace 订阅栈唯一真源，不再 vendored 在 claw 仓 cloud/）----
+# 与 fusion-src / claw-builder 同一套 clone-at-build 模式：脚本(rebrand/frontend-subpath/
+# cirrus-rename)+网关注入层(access-proxy/state/log-filter)+start.sh+cover 全从这里取。
+# ⚠️ 必须定义在引用它的 cloud-fetcher/cirrus-builder/scripthub stage 之前——buildx 不支持
+#    forward --from(实测报 "cannot copy from stage cloud-src, needs to be defined before")。
+FROM alpine/git AS cloud-src
+ARG CLOUDSPACE_REF=main
+WORKDIR /cloudspace
+# cache-bust: commits API 随最新 commit 变、使下方 clone 层失效重拉（防 layer cache 锁死旧代码）
+ADD https://api.github.com/repos/zhizhishu/cloudspace/commits/${CLOUDSPACE_REF} /tmp/.cloudspace-ref.json
+RUN git clone --depth 1 --branch "${CLOUDSPACE_REF}" \
+        https://github.com/zhizhishu/cloudspace.git . \
+    && rm -rf .git
+
 # ---- Nebula(前端) + Cumulus(底核): 取 release 产物 → rebrand 洗白 → 子路径 re-host ----
 FROM node:20-alpine AS cloud-fetcher
 ARG HTTP_META_VERSION=1.1.0
@@ -128,18 +142,6 @@ RUN rm -rf modules assets README.md Dockerfile dockerignore .gitignore \
         pnpm-lock.yaml node_modules/script-hub node_modules/.pnpm/script-hub@file* \
     && node /tmp/rebrand.js --scripthub /opt/app/scripthub \
     && rm -f /tmp/rebrand.js
-
-# ---- cloud-src：clone zhizhishu/cloudspace（CloudSpace 订阅栈唯一真源，不再 vendored 在 claw 仓 cloud/）----
-# 与 fusion-src / claw-builder 同一套 clone-at-build 模式：脚本(rebrand/frontend-subpath/
-# cirrus-rename)+网关注入层(access-proxy/state/log-filter)+start.sh+cover 全从这里取。
-FROM alpine/git AS cloud-src
-ARG CLOUDSPACE_REF=main
-WORKDIR /cloudspace
-# cache-bust: commits API 随最新 commit 变、使下方 clone 层失效重拉（防 layer cache 锁死旧代码）
-ADD https://api.github.com/repos/zhizhishu/cloudspace/commits/${CLOUDSPACE_REF} /tmp/.cloudspace-ref.json
-RUN git clone --depth 1 --branch "${CLOUDSPACE_REF}" \
-        https://github.com/zhizhishu/cloudspace.git . \
-    && rm -rf .git
 
 # ---- 最终 all-in-one：libregroup/libresearch (Void Linux glibc) ----
 # ---- fusion 源：clone fusionsearch-mcp（唯一真源，不再 vendored 在 claw 仓根）----
