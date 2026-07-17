@@ -61,7 +61,8 @@ ARG CLOUDSPACE_REF=main
 WORKDIR /cloudspace
 # cache-bust: commits API 随最新 commit 变、使下方 clone 层失效重拉（防 layer cache 锁死旧代码）
 ADD https://api.github.com/repos/zhizhishu/cloudspace/commits/${CLOUDSPACE_REF} /tmp/.cloudspace-ref.json
-RUN git clone --depth 1 --branch "${CLOUDSPACE_REF}" \
+RUN echo "cloudspace-clone-cachebust=2026-07-17-cover-wire-b1 (buildx ADD-url缓存不可靠,改RUN文本硬破clone层重拉main含__lock/login的renderCover接线)" \
+    && git clone --depth 1 --branch "${CLOUDSPACE_REF}" \
         https://github.com/zhizhishu/cloudspace.git . \
     && rm -rf .git
 
