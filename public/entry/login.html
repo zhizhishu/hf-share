@@ -360,9 +360,12 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({ password: pw.value, next: '/cloudspace/' }),
-        credentials: 'same-origin'
+        credentials: 'same-origin',
+        redirect: 'manual'
       }).then(function (r) {
-        if (r.redirected || r.ok) { window.location.href = '/cloudspace/'; return; }
+        // 成功=访问锁返回 3xx 重定向(redirect:manual 下呈现为 opaqueredirect,且 Set-Cookie 已生效);
+        // 此时导航到 /cloudspace/ 会带上刚种的 cookie 直接进入。密码错=401。
+        if (r.type === 'opaqueredirect' || r.ok) { window.location.href = '/cloudspace/'; return; }
         submit.disabled = false;
         if (err) { err.textContent = r.status === 401 ? '密码不对，再试一次' : ('进入失败(' + r.status + ')，再试一次'); err.hidden = false; }
         if (panel) { panel.classList.remove('cloudgate-shake'); void panel.offsetWidth; panel.classList.add('cloudgate-shake'); }
