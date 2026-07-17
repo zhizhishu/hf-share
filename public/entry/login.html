@@ -251,129 +251,147 @@
     <!-- 左右热点直跳各自服务;中央「石头」改为浮出下方密码弹窗(潜入 CloudSpace) -->
   </div>
 
-  <!-- ============ 云空间密码弹窗:石头点击浮出,替掉 /cloudspace 原生丑登录 ============ -->
+  <!-- ============ 石头→cloudspace 玻璃密码面板 + 右海→fusion Jinx视频浮层(统一电影揭示语言) ============ -->
   <style>
-    .cloudgate { position: fixed; inset: 0; z-index: 40; display: none; align-items: center; justify-content: center; padding: calc(20 * var(--u)); }
-    .cloudgate.is-open { display: flex; }
-    .cloudgate-backdrop { position: absolute; inset: 0; background: rgba(2,6,13,.62); backdrop-filter: blur(10px) saturate(1.1); -webkit-backdrop-filter: blur(10px) saturate(1.1); animation: cloudgateFade .4s ease both; }
+    /* 石头密码面板:海洋玻璃 Access Key(对齐 Jinx 门的 panelIn 揭示效果,用封面蓝 accent) */
+    .cloudgate { position: fixed; inset: 0; z-index: 40; display: none; }
+    .cloudgate.is-open { display: block; }
+    .cloudgate-backdrop { position: absolute; inset: 0; background: rgba(2,6,13,.34); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); animation: cgFade .5s ease both; }
     .cloudgate-panel {
-      position: relative; width: min(calc(360 * var(--u)), calc(100vw - 40px)); max-width: 384px;
-      padding: calc(30 * var(--u)) calc(28 * var(--u)) calc(24 * var(--u));
-      border: 1px solid rgba(155,184,225,.32); border-radius: calc(14 * var(--u));
-      background: linear-gradient(180deg, rgba(26,38,52,.88), rgba(11,18,27,.93));
-      box-shadow: 0 30px 90px rgba(0,0,0,.55), inset 0 1px 0 rgba(227,244,255,.08);
-      backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
-      text-align: center; animation: cloudgateRise .5s cubic-bezier(.14,1,.34,1) both;
+      position: fixed; z-index: 41; left: 50%; top: 50%; transform: translate(-50%,-50%) scale(0.94);
+      width: min(344px, 86vw); padding: 24px 26px 20px; display: none; flex-direction: column; align-items: center; gap: 13px; opacity: 0;
+      background: rgba(13,20,32,.62); backdrop-filter: blur(26px) saturate(150%); -webkit-backdrop-filter: blur(26px) saturate(150%);
+      border: 1px solid rgba(155,184,225,.28); border-radius: 10px;
+      box-shadow: inset 0 1px 0 rgba(227,244,255,.09), 0 18px 60px rgba(0,0,0,.55), 0 0 70px rgba(155,184,225,.10);
     }
-    .cloudgate-x { position: absolute; top: calc(10 * var(--u)); right: calc(14 * var(--u)); width: calc(32 * var(--u)); height: calc(32 * var(--u)); border: 0; background: none; color: var(--muted); font-size: calc(23 * var(--u)); line-height: 1; cursor: pointer; transition: color .3s; }
-    .cloudgate-x:hover { color: var(--fg); }
-    .cloudgate-mark { width: calc(42 * var(--u)); height: calc(41 * var(--u)); margin: 0 auto calc(12 * var(--u)); filter: drop-shadow(0 0 calc(10 * var(--u)) rgba(155,184,225,.5)); }
-    .cloudgate-title { font-weight: 650; font-size: calc(21 * var(--u)); letter-spacing: .04em; color: var(--fg); }
-    .cloudgate-sub { margin-top: calc(6 * var(--u)); font-weight: 600; font-size: calc(9.5 * var(--u)); letter-spacing: .28em; text-transform: uppercase; color: var(--accent); }
-    .cloudgate-form { display: grid; gap: calc(12 * var(--u)); margin-top: calc(22 * var(--u)); }
+    .cloudgate.is-open .cloudgate-panel { display: flex; animation: cgPanelIn .5s cubic-bezier(.22,1,.36,1) forwards; }
+    .cloudgate-panel.cg-shake { animation: cgShake .5s both; }
+    .cloudgate-mark { width: 30px; height: 29px; filter: drop-shadow(0 0 9px rgba(155,184,225,.55)); }
+    .cloudgate-label { font-size: 8.5px; font-weight: 600; letter-spacing: .36em; text-transform: uppercase; color: rgba(155,184,225,.72); }
+    .cloudgate-title { font-size: 15px; font-weight: 640; letter-spacing: .1em; color: var(--fg); margin-top: -4px; }
+    .cloudgate form { display: flex; align-items: center; gap: 11px; margin-top: 2px; }
     .cloudgate-input {
-      height: calc(44 * var(--u)); padding: 0 calc(16 * var(--u)); font-size: calc(15 * var(--u)); color: var(--fg);
-      background: rgba(4,7,13,.6); border: 1px solid rgba(155,184,225,.28); border-radius: calc(8 * var(--u));
-      outline: none; transition: border-color .3s, box-shadow .3s; text-align: center; letter-spacing: .08em;
+      width: 178px; padding: 9px 14px; text-align: center; background: rgba(255,255,255,.04); border: none;
+      border-bottom: 1.5px solid rgba(155,184,225,.36); color: var(--fg); font: inherit; font-size: 14px;
+      letter-spacing: .26em; caret-color: var(--accent); outline: none; transition: border-color .2s;
     }
-    .cloudgate-input::placeholder { color: var(--muted); letter-spacing: .12em; }
-    .cloudgate-input:focus { border-color: rgba(155,184,225,.7); box-shadow: 0 0 0 calc(3 * var(--u)) rgba(155,184,225,.14); }
-    .cloudgate-submit {
-      height: calc(44 * var(--u)); display: inline-flex; align-items: center; justify-content: center; gap: calc(8 * var(--u));
-      border: 1px solid rgba(155,184,225,.5); border-radius: calc(8 * var(--u)); cursor: pointer;
-      background: linear-gradient(180deg, rgba(155,184,225,.22), rgba(155,184,225,.08)); color: var(--fg);
-      font: inherit; font-weight: 650; font-size: calc(12 * var(--u)); letter-spacing: .16em; text-transform: uppercase;
-      transition: background .3s, border-color .3s, transform .2s;
+    .cloudgate-input::placeholder { color: rgba(238,241,255,.32); letter-spacing: .18em; }
+    .cloudgate-input:focus { border-bottom-color: rgba(155,184,225,.9); }
+    .cloudgate-key {
+      display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; flex-shrink: 0;
+      background: transparent; border: 1px solid rgba(155,184,225,.36); border-radius: 50%; color: var(--fg);
+      cursor: pointer; transition: background .2s, border-color .2s;
     }
-    .cloudgate-submit:hover { background: linear-gradient(180deg, rgba(155,184,225,.34), rgba(155,184,225,.14)); border-color: rgba(155,184,225,.8); }
-    .cloudgate-submit:active { transform: translateY(1px); }
-    .cloudgate-submit[disabled] { opacity: .55; cursor: default; }
-    .cloudgate-enter-arrow { transition: transform .3s cubic-bezier(.14,1,.34,1); }
-    .cloudgate-submit:hover .cloudgate-enter-arrow { transform: translateX(calc(4 * var(--u))); }
-    .cloudgate-err { font-size: calc(11 * var(--u)); color: #ff9db0; letter-spacing: .04em; min-height: calc(14 * var(--u)); }
-    .cloudgate-hint { margin-top: calc(16 * var(--u)); font-size: calc(9.5 * var(--u)); letter-spacing: .14em; color: var(--muted); }
-    @keyframes cloudgateFade { from { opacity: 0; } to { opacity: 1; } }
-    @keyframes cloudgateRise { from { opacity: 0; transform: translateY(calc(16 * var(--u))) scale(.97); } to { opacity: 1; transform: none; } }
-    @keyframes cloudgateShake { 0%,100% { transform: translateX(0); } 20%,60% { transform: translateX(calc(-7 * var(--u))); } 40%,80% { transform: translateX(calc(7 * var(--u))); } }
-    .cloudgate-shake { animation: cloudgateShake .4s ease; }
+    .cloudgate-key:hover { background: rgba(155,184,225,.16); border-color: rgba(155,184,225,.8); }
+    .cloudgate-key[disabled] { opacity: .5; cursor: default; }
+    .cloudgate-err { min-height: 11px; font-size: 8.5px; letter-spacing: .22em; text-transform: uppercase; color: rgba(255,157,176,.92); }
+    .cloudgate-hint { font-size: 8.5px; letter-spacing: .2em; color: var(--muted); text-transform: uppercase; }
+    .cloudgate-x, .fusiongate-x {
+      position: fixed; z-index: 60; top: 20px; right: 22px; width: 36px; height: 36px; border: 0; background: none;
+      color: rgba(206,228,255,.7); font-size: 27px; line-height: 1; cursor: pointer; transition: color .3s; display: none;
+    }
+    .cloudgate.is-open .cloudgate-x { display: block; }
+    .cloudgate-x:hover, .fusiongate-x:hover { color: var(--fg); }
+    @keyframes cgFade { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes cgPanelIn { from { opacity: 0; transform: translate(-50%,-50%) scale(0.9); } to { opacity: 1; transform: translate(-50%,-50%) scale(1); } }
+    @keyframes cgShake { 0%,100% { transform: translate(-50%,-50%); } 20% { transform: translate(calc(-50% - 7px),-50%); } 40% { transform: translate(calc(-50% + 7px),-50%); } 60% { transform: translate(calc(-50% - 4px),-50%); } 80% { transform: translate(calc(-50% + 4px),-50%); } }
+
+    /* 右海 → fusion Jinx 视频体验:全屏 iframe 浮层(覆盖封面) */
+    .fusiongate { position: fixed; inset: 0; z-index: 45; display: none; background: #04070d; }
+    .fusiongate.is-open { display: block; animation: cgFade .35s ease both; }
+    .fusiongate iframe { width: 100%; height: 100%; border: 0; display: block; }
+    .fusiongate.is-open .fusiongate-x { display: block; }
   </style>
+
   <div class="cloudgate" id="cloudgate" aria-hidden="true">
     <div class="cloudgate-backdrop" data-cloudgate-close></div>
-    <div class="cloudgate-panel" role="dialog" aria-modal="true" aria-label="潜入云空间">
-      <button class="cloudgate-x" type="button" data-cloudgate-close aria-label="关闭">&times;</button>
+    <button class="cloudgate-x" type="button" data-cloudgate-close aria-label="关闭">&times;</button>
+    <div class="cloudgate-panel" id="cloudgate-panel" role="dialog" aria-modal="true" aria-label="潜入云空间">
       <svg class="cloudgate-mark" viewBox="0 0 42 41" fill="none" aria-hidden="true">
-        <path d="M21 2 L40 38 L2 38 Z" stroke="#9bb8e1" stroke-width="1.3"></path>
-        <path d="M21 13 L30.5 31 L11.5 31 Z" stroke="#e3f4ff" stroke-width="1"></path>
+        <path d="M21 2 L40 38 L2 38 Z" stroke="#9bb8e1" stroke-width="1.4"></path>
+        <path d="M21 13 L30.5 31 L11.5 31 Z" stroke="#e3f4ff" stroke-width="1.1"></path>
       </svg>
+      <div class="cloudgate-label">CloudSpace Access</div>
       <div class="cloudgate-title">潜入云空间</div>
-      <div class="cloudgate-sub">CloudSpace · 访问密码</div>
-      <form class="cloudgate-form" id="cloudgate-form" method="post" action="/cloudspace/__lock/login">
+      <form class="cloudgate-form" id="cloudgate-form">
         <input type="hidden" name="next" value="/cloudspace/">
-        <input class="cloudgate-input" id="cloudgate-pw" name="password" type="password"
-               autocomplete="current-password" placeholder="输入访问密码" aria-label="访问密码" required>
-        <button class="cloudgate-submit" id="cloudgate-submit" type="submit">
-          <span>潜入</span><span class="cloudgate-enter-arrow">&rarr;</span>
+        <input class="cloudgate-input" id="cloudgate-pw" name="password" type="password" autocomplete="current-password" placeholder="访问密码" aria-label="访问密码" required>
+        <button class="cloudgate-key" id="cloudgate-submit" type="submit" aria-label="潜入">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 6l6 6-6 6"></path></svg>
         </button>
-        <div class="cloudgate-err" id="cloudgate-err" role="alert" hidden></div>
       </form>
-      <div class="cloudgate-hint">海面之下，是你的云。</div>
+      <div class="cloudgate-err" id="cloudgate-err" role="alert"></div>
+      <div class="cloudgate-hint">海面之下 · 是你的云</div>
     </div>
   </div>
+
+  <div class="fusiongate" id="fusiongate" aria-hidden="true">
+    <button class="fusiongate-x" type="button" data-fusiongate-close aria-label="关闭">&times;</button>
+    <iframe id="fusiongate-frame" title="FusionSearch 访问" allow="autoplay"></iframe>
+  </div>
+
   <script>
   (function () {
+    // ---------- 石头 → cloudspace 玻璃面板 ----------
     var gate = document.getElementById('cloudgate');
     var form = document.getElementById('cloudgate-form');
     var pw = document.getElementById('cloudgate-pw');
     var submit = document.getElementById('cloudgate-submit');
     var err = document.getElementById('cloudgate-err');
-    var panel = gate && gate.querySelector('.cloudgate-panel');
-    if (!gate || !form) return;
+    var panel = document.getElementById('cloudgate-panel');
     function openGate() {
-      gate.classList.add('is-open');
-      gate.setAttribute('aria-hidden', 'false');
-      setTimeout(function () { try { pw.focus(); } catch (e) {} }, 60);
+      gate.classList.add('is-open'); gate.setAttribute('aria-hidden', 'false');
+      setTimeout(function () { try { pw.focus(); } catch (e) {} }, 80);
     }
-    function closeGate() {
-      gate.classList.remove('is-open');
-      gate.setAttribute('aria-hidden', 'true');
-      if (err) err.hidden = true;
+    function closeGate() { gate.classList.remove('is-open'); gate.setAttribute('aria-hidden', 'true'); if (err) err.textContent = ''; }
+    function shake(msg) {
+      if (err) err.textContent = msg;
+      if (panel) { panel.classList.remove('cg-shake'); void panel.offsetWidth; panel.classList.add('cg-shake'); }
+      try { pw.value = ''; pw.focus(); } catch (e) {}
     }
-    // 捕获阶段拦截中央「石头」及顶部"解锁/CTA/logo"点击 —— 先于 cover.bundle.js 的跳转处理,
-    // 改为浮出密码弹窗;左/右海热点(#hotspot-email / #hotspot-fusion)不拦,照旧直跳各服务。
-    document.addEventListener('click', function (e) {
-      var t = e.target.closest ? e.target.closest('#hotspot-cloud, [data-cover-open]') : null;
-      if (t) { e.preventDefault(); e.stopPropagation(); openGate(); }
-    }, true);
-    gate.addEventListener('click', function (e) {
-      if (e.target && e.target.hasAttribute && e.target.hasAttribute('data-cloudgate-close')) closeGate();
-    });
-    document.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape' && gate.classList.contains('is-open')) closeGate();
-    });
-    // 提交:fetch POST 到 cloudspace 访问锁;成功(303 重定向)→ 进 /cloudspace/,401 → 内联抖动报错,绝不落丑页。
-    form.addEventListener('submit', function (e) {
+    if (form) form.addEventListener('submit', function (e) {
       e.preventDefault();
       if (submit.disabled) return;
-      submit.disabled = true;
-      if (err) err.hidden = true;
+      submit.disabled = true; if (err) err.textContent = '';
       fetch('/cloudspace/__lock/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ password: pw.value, next: '/cloudspace/' }),
-        credentials: 'same-origin',
-        redirect: 'manual'
+        method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ password: pw.value, next: '/cloudspace/' }), credentials: 'same-origin', redirect: 'manual'
       }).then(function (r) {
-        // 成功=访问锁返回 3xx 重定向(redirect:manual 下呈现为 opaqueredirect,且 Set-Cookie 已生效);
-        // 此时导航到 /cloudspace/ 会带上刚种的 cookie 直接进入。密码错=401。
+        // 成功=访问锁 3xx(opaqueredirect,Set-Cookie已生效)→带cookie进app;401=密码错。
         if (r.type === 'opaqueredirect' || r.ok) { window.location.href = '/cloudspace/'; return; }
-        submit.disabled = false;
-        if (err) { err.textContent = r.status === 401 ? '密码不对，再试一次' : ('进入失败(' + r.status + ')，再试一次'); err.hidden = false; }
-        if (panel) { panel.classList.remove('cloudgate-shake'); void panel.offsetWidth; panel.classList.add('cloudgate-shake'); }
-        try { pw.select(); } catch (e2) {}
-      }).catch(function () {
-        submit.disabled = false;
-        if (err) { err.textContent = '网络异常，再试一次'; err.hidden = false; }
-      });
+        submit.disabled = false; shake(r.status === 401 ? '密码不对' : ('失败 ' + r.status));
+      }).catch(function () { submit.disabled = false; shake('网络异常'); });
+    });
+
+    // ---------- 右海 → fusion Jinx 视频浮层 ----------
+    var fg = document.getElementById('fusiongate');
+    var fgFrame = document.getElementById('fusiongate-frame');
+    var fgLoaded = false;
+    function openFusion() {
+      if (!fgLoaded) { fgFrame.src = '/entry/gate-fusion.html'; fgLoaded = true; }
+      fg.classList.add('is-open'); fg.setAttribute('aria-hidden', 'false');
+    }
+    function closeFusion() { fg.classList.remove('is-open'); fg.setAttribute('aria-hidden', 'true'); }
+    // iframe 内(同源)按 ESC 时冒不到父页,登入成功由 gate-fusion 自己导航 window.top;这里桥接 ESC 关闭。
+    if (fgFrame) fgFrame.addEventListener('load', function () {
+      try {
+        fgFrame.contentWindow.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeFusion(); });
+      } catch (e) {}
+    });
+
+    // ---------- 捕获阶段统一拦截热点(先于 cover.bundle.js 的跳转) ----------
+    document.addEventListener('click', function (e) {
+      if (!e.target.closest) return;
+      if (e.target.closest('[data-cloudgate-close]')) { e.preventDefault(); e.stopPropagation(); closeGate(); return; }
+      if (e.target.closest('[data-fusiongate-close]')) { e.preventDefault(); e.stopPropagation(); closeFusion(); return; }
+      if (e.target.closest('#hotspot-cloud, [data-cover-open]')) { e.preventDefault(); e.stopPropagation(); openGate(); return; }
+      if (e.target.closest('#hotspot-fusion')) { e.preventDefault(); e.stopPropagation(); openFusion(); return; }
+      // #hotspot-email 不拦,照旧直跳 /clawemail/
+    }, true);
+    document.addEventListener('keydown', function (e) {
+      if (e.key !== 'Escape') return;
+      if (gate.classList.contains('is-open')) closeGate();
+      else if (fg.classList.contains('is-open')) closeFusion();
     });
   })();
   </script>
