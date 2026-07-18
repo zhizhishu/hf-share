@@ -158,9 +158,36 @@ function boot() {
   const onMove = (e) => { target.x = e.clientX / window.innerWidth - 0.5; target.y = e.clientY / window.innerHeight - 0.5 }
   window.addEventListener("pointermove", onMove)
 
+  // ---- 手机端视差:陀螺仪(deviceorientation)驱动同一个 target,倾斜手机即视差 ----
+  const onTilt = (e) => {
+    if (e == null || (e.gamma == null && e.beta == null)) return
+    // gamma 左右倾斜(-90..90)→x;beta 前后倾斜(竖握约 45°基准)→y。夹在 [-0.5, 0.5]。
+    target.x = Math.max(-0.5, Math.min(0.5, (e.gamma || 0) / 45))
+    target.y = Math.max(-0.5, Math.min(0.5, ((e.beta || 0) - 45) / 45))
+  }
+  window.addEventListener("deviceorientation", onTilt)
+  // iOS 13+ 需用户手势里申请陀螺仪权限;首次触摸时尝试,失败静默(降级为无视差)。
+  const enableTilt = () => {
+    try {
+      const D = window.DeviceOrientationEvent
+      if (D && typeof D.requestPermission === "function") {
+        D.requestPermission().then((s) => { if (s === "granted") window.addEventListener("deviceorientation", onTilt) }).catch(() => {})
+      }
+    } catch (_) {}
+    window.removeEventListener("touchend", enableTilt)
+  }
+  window.addEventListener("touchend", enableTilt, { passive: true })
+
   const resize = () => {
     w = window.innerWidth; h = window.innerHeight
     renderer.setSize(w, h, false); composer.setSize(w, h)
+    // 手机竖屏适配:窄视口下左右海锚点(x=±48)会飞出侧边 —— 竖屏时拉远相机 + 加宽 FOV +
+    // 收窄左右海间距,让"左海/中央/右海"三处都进画且够得着;横屏/桌面维持原构图。
+    const portrait = h > w
+    camera.fov = portrait ? 76 : 55
+    HERO_POS.set(0, portrait ? 9.5 : 8.5, portrait ? 40 : 24)
+    const spread = portrait ? 26 : 48
+    ENTRIES[0].world.x = -spread; ENTRIES[2].world.x = spread
     camera.aspect = w / h; camera.updateProjectionMatrix()
   }
   resize(); window.addEventListener("resize", resize)
@@ -200,8 +227,8 @@ function boot() {
       water.material.uniforms.time.value += dt * 0.5
       if (gem) {
         gemSpin += dt * 0.1
-        gem.rotation.y = gemSpin + cur.x * 0.7
-        gem.rotation.x = cur.y * 0.45
+        gem.rotation.y = gemSpin + cur.x * 1.05
+        gem.rotation.x = cur.y * 0.62
         const floatY = Math.sin(elapsed * 0.6) * 0.9
         gem.position.y = gemBaseY + floatY
         ENTRIES[1].world.y = GEM_Y + floatY  // 中间水晶锚点跟着上下浮动
@@ -211,7 +238,7 @@ function boot() {
     if (entered) dollyT = Math.min(1, dollyT + dt / 2.4)
     const e = 1 - Math.pow(1 - dollyT, 3)
     tmpPos.lerpVectors(FAR_POS, HERO_POS, e)
-    tmpPos.x += cur.x * 7 * e; tmpPos.y += -cur.y * 4 * e
+    tmpPos.x += cur.x * 16 * e; tmpPos.y += -cur.y * 9 * e
     camera.position.copy(tmpPos)
     tmpLook.lerpVectors(FAR_LOOK, HERO_LOOK, e)
     camera.lookAt(tmpLook)
