@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex">
+  <title>ClawMail</title>
+  <style>
+    @font-face { font-family: "Space Grotesk"; font-style: normal; font-weight: 300 700; font-display: swap; src: url("/entry/fonts/space-grotesk-latin.woff2") format("woff2"); }
+    :root { --u: calc(100vw / 390); --bg: #04070d; --fg: #eef3f8; --accent: #9bb8e1; --muted: #5d6c7d; --copy: #b7c6d4; color-scheme: dark; }
+    @media (min-width: 1024px) { :root { --u: calc(100vw / 1440); } }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; }
+    body {
+      background: radial-gradient(130% 100% at 50% 8%, #24384d 0%, #101a26 46%, var(--bg) 100%);
+      color: var(--fg); overflow: hidden;
+      font-family: "Space Grotesk", "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+      -webkit-font-smoothing: antialiased; display: grid; place-items: center; min-height: 100vh;
+    }
+    /* 海面微光 + 网格质感 */
+    body::before { content: ""; position: fixed; inset: 0; pointer-events: none;
+      background: linear-gradient(180deg, transparent 0%, transparent 62%, rgba(155,184,225,.05) 72%, transparent 100%),
+        radial-gradient(100% 60% at 50% 120%, rgba(155,184,225,.10), transparent 60%); }
+    .wrap { position: relative; z-index: 1; width: min(calc(680 * var(--u)), calc(100vw - 44px)); text-align: center;
+      animation: rise .7s cubic-bezier(.14,1,.34,1) both; }
+    .mark { width: calc(46 * var(--u)); height: calc(45 * var(--u)); margin: 0 auto calc(20 * var(--u));
+      filter: drop-shadow(0 0 calc(12 * var(--u)) rgba(155,184,225,.45)); }
+    .kicker { font-size: calc(9.5 * var(--u)); font-weight: 700; letter-spacing: .42em; text-transform: uppercase; color: var(--accent); }
+    .title { margin: calc(12 * var(--u)) 0 calc(14 * var(--u)); font-size: calc(52 * var(--u)); font-weight: 650; letter-spacing: .02em; line-height: 1; }
+    @media (max-width: 1023px) { .title { font-size: calc(38 * var(--u)); } }
+    .lede { margin: 0 auto calc(26 * var(--u)); max-width: calc(520 * var(--u)); color: var(--copy); font-size: calc(14 * var(--u)); line-height: 1.7; letter-spacing: .01em; }
+    @media (max-width: 1023px) { .lede { font-size: calc(12.5 * var(--u)); } }
+    .feats { display: flex; gap: calc(10 * var(--u)); justify-content: center; flex-wrap: wrap; margin-bottom: calc(30 * var(--u)); }
+    .feat { padding: calc(7 * var(--u)) calc(14 * var(--u)); border: 1px solid rgba(155,184,225,.22); border-radius: 999px;
+      background: rgba(155,184,225,.05); font-size: calc(9.5 * var(--u)); font-weight: 600; letter-spacing: .16em; text-transform: uppercase; color: var(--copy); }
+    .enter { display: inline-flex; align-items: center; gap: calc(9 * var(--u)); height: calc(46 * var(--u)); padding: 0 calc(26 * var(--u));
+      border: 1px solid rgba(155,184,225,.5); border-radius: calc(9 * var(--u)); cursor: pointer; text-decoration: none; color: var(--fg);
+      font: inherit; font-weight: 650; font-size: calc(12 * var(--u)); letter-spacing: .16em; text-transform: uppercase;
+      background: linear-gradient(180deg, rgba(155,184,225,.20), rgba(155,184,225,.06)); transition: background .3s, border-color .3s, transform .2s; }
+    .enter:hover { background: linear-gradient(180deg, rgba(155,184,225,.34), rgba(155,184,225,.12)); border-color: rgba(155,184,225,.85); }
+    .enter:active { transform: translateY(1px); }
+    .arrow { transition: transform .3s cubic-bezier(.14,1,.34,1); }
+    .enter:hover .arrow { transform: translateX(calc(4 * var(--u))); }
+    .foot { margin-top: calc(24 * var(--u)); font-size: calc(8.5 * var(--u)); letter-spacing: .2em; text-transform: uppercase; color: var(--muted); }
+    @keyframes rise { from { opacity: 0; transform: translateY(calc(16 * var(--u))); } to { opacity: 1; transform: none; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <svg class="mark" viewBox="0 0 42 41" fill="none" aria-hidden="true">
+      <path d="M21 2 L40 38 L2 38 Z" stroke="#9bb8e1" stroke-width="1.3"></path>
+      <path d="M21 13 L30.5 31 L11.5 31 Z" stroke="#e3f4ff" stroke-width="1"></path>
+    </svg>
+    <div class="kicker">Left Light · Mail</div>
+    <h1 class="title">ClawMail</h1>
+    <p class="lede">A private mailbox console living under the sea — spin up disposable addresses on your own domains, receive real mail, read it in one calm inbox. No trackers, no noise.</p>
+    <div class="feats">
+      <span class="feat">Disposable addresses</span>
+      <span class="feat">Real inbox</span>
+      <span class="feat">Your domains</span>
+      <span class="feat">Privacy-first</span>
+    </div>
+    <a class="enter" id="enter-mail" href="/clawemail/">Enter the mailbox <span class="arrow">&rarr;</span></a>
+    <div class="foot">Touch the sea · Dive in</div>
+  </div>
+  <script>
+    // 在封面 iframe 浮层里点"进入" → 导航父窗口进邮箱;直接打开时 window.top===window 也成立。
+    document.getElementById("enter-mail").addEventListener("click", function (e) {
+      e.preventDefault(); (window.top || window).location.href = "/clawemail/";
+    });
+  </script>
+</body>
+</html>

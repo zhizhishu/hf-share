@@ -6,10 +6,9 @@
   <meta name="robots" content="noindex, nofollow" />
   <meta name="theme-color" content="#0d0e1a" />
   <title>FusionSearch · Access</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
   <style>
+    /* 自托管 Space Grotesk（国内被墙，绝不外链 Google Fonts —— 否则渲染阻塞白屏） */
+    @font-face { font-family: "Space Grotesk"; font-style: normal; font-weight: 300 700; font-display: swap; src: url("/entry/fonts/space-grotesk-latin.woff2") format("woff2"); }
     :root {
       --ink: #eef1ff;
       --pink: #e87fa0;
@@ -338,8 +337,9 @@
           video.style.transition = "opacity 0.6s ease"; video.style.opacity = "0";
           canvas.style.transition = "opacity 0.6s ease"; canvas.style.opacity = "0";
           var gr = document.querySelector(".grain"); if (gr) gr.style.opacity = "0";
-          // 在封面 iframe 浮层里 → 导航父窗口进 fusion;直接打开时 window.top===window 也成立。
-          setTimeout(function () { (window.top || window).location.href = "/fusionsearch-mcp"; }, 640);
+          // 在封面 iframe 浮层里 → 导航父窗口进 fusion 管理台;直接打开时 window.top===window 也成立。
+          // claw 三合一里 fusion 挂在根(/admin 是设置台,/ 是海洋封面),别跳 /fusionsearch-mcp(404)。
+          setTimeout(function () { (window.top || window).location.href = "/admin"; }, 640);
         } else { fail(r.status === 401 ? "口令无效" : "进入失败"); }
       }).catch(function () { fail("网络异常"); });
     });
