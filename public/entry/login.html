@@ -5,6 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="robots" content="noindex">
   <title>claw.</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script>document.documentElement.classList.add("js")</script>
   <style>
     /* ============================================================
@@ -33,7 +36,7 @@
         radial-gradient(120% 90% at 50% 12%, #2a3a4d 0%, #131c27 46%, var(--bg) 100%);
       color: var(--fg);
       overflow: hidden;
-      font-family: "Inter", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+      font-family: "Space Grotesk", "Inter", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
       -webkit-font-smoothing: antialiased;
       text-rendering: optimizeLegibility;
     }
@@ -179,12 +182,22 @@
 
     @media (max-width: 1023px) {
       .cover-hero { flex-direction: column; align-items: center; justify-content: flex-end; text-align: center; padding-bottom: calc(120 * var(--u)); }
-      .cover-hero-title { font-size: calc(36 * var(--u)); text-align: center; }
+      /* 手机端字号整体调小(用户反馈太大) */
+      .cover-hero-title { font-size: calc(27 * var(--u)); text-align: center; letter-spacing: .01em; }
+      .cover-hero-title .sub { font-size: calc(10.5 * var(--u)); margin-top: calc(10 * var(--u)); letter-spacing: .04em; }
       .cover-hero-cta { display: none; }
       .cover-toggle { display: none; }
-      .cover-logo { left: calc(26 * var(--u)); top: calc(26 * var(--u)); }
-      .cover-topright { right: calc(26 * var(--u)); top: calc(28 * var(--u)); }
-      .cover-hint { top: auto; bottom: calc(46 * var(--u)); }
+      .cover-logo { left: calc(24 * var(--u)); top: calc(24 * var(--u)); }
+      .cover-logo-type b { font-size: calc(14 * var(--u)); }
+      .cover-logo-type small { font-size: calc(7 * var(--u)); }
+      .cover-topright { right: calc(24 * var(--u)); top: calc(26 * var(--u)); }
+      .cover-enter { font-size: calc(8.5 * var(--u)); height: calc(30 * var(--u)); min-width: calc(96 * var(--u)); padding: 0 calc(16 * var(--u)); }
+      .cover-hint { top: auto; bottom: calc(44 * var(--u)); font-size: calc(8.5 * var(--u)); letter-spacing: .14em; }
+      .cover-loader-title { font-size: calc(24 * var(--u)); }
+      .cover-loader-copy { font-size: calc(8 * var(--u)); }
+      .cover-loader-status { font-size: calc(8.5 * var(--u)); }
+      .stonebox-kicker { font-size: calc(8 * var(--u)); }
+      .stonebox-input { width: calc(124 * var(--u)); font-size: calc(12 * var(--u)); }
     }
     @media (prefers-reduced-motion: reduce) {
       .cover-hotspot::after { animation: none; }
@@ -206,13 +219,13 @@
       <div class="cover-loader-title">claw.</div>
       <div class="cover-loader-bar"><i id="cover-bar-fill"></i></div>
       <div class="cover-loader-status" id="cover-status">LOADING</div>
-      <div class="cover-loader-copy">一片海 · 三盏灯<br>AN OCEAN OF THREE LIGHTS</div>
+      <div class="cover-loader-copy">AN OCEAN OF THREE LIGHTS</div>
     </div>
 
     <!-- 三个入口热点(JS 每帧投影到对应 3D 锚点上;左海=邮箱 中=云 右海=搜索) -->
-    <a class="cover-hotspot" id="hotspot-email"  href="/clawemail/" role="button" aria-label="邮箱 Email"></a>
-    <a class="cover-hotspot" id="hotspot-cloud"  href="#" role="button" aria-label="云空间 CloudSpace"></a>
-    <a class="cover-hotspot" id="hotspot-fusion" href="#" role="button" aria-label="搜索 FusionSearch"></a>
+    <a class="cover-hotspot" id="hotspot-email"  href="/clawemail/" role="button" aria-label="Mail"></a>
+    <a class="cover-hotspot" id="hotspot-cloud"  href="#" role="button" aria-label="CloudSpace"></a>
+    <a class="cover-hotspot" id="hotspot-fusion" href="#" role="button" aria-label="Search"></a>
 
     <!-- chrome -->
     <div class="cover-chrome">
@@ -227,24 +240,24 @@
 
       <div class="cover-topright cover-fade d1">
         <button class="cover-toggle" id="cover-motion" type="button" aria-pressed="true">
-          动效 <b>ON</b>
+          MOTION <b>ON</b>
           <svg viewBox="0 0 24 8" fill="none" aria-hidden="true"><path d="M0 4 H5 L7 1 L10 7 L13 2 L16 6 L18 4 H24" stroke="currentColor" stroke-width="1"></path></svg>
         </button>
         <button class="cover-enter" type="button" data-cover-open>
-          解锁 <span class="cover-enter-arrow">&rarr;</span>
+          ENTER <span class="cover-enter-arrow">&rarr;</span>
         </button>
       </div>
 
       <div class="cover-hero">
-        <h1 class="cover-hero-title cover-fade d2">一片海，三盏灯<span class="sub">左海 · 邮箱　|　中央 · 云　|　右海 · 搜索 —— 点亮你要去的那处光。</span></h1>
+        <h1 class="cover-hero-title cover-fade d2">AN OCEAN OF<br>THREE LIGHTS<span class="sub">Mail · Cloud · Search — touch the light you seek.</span></h1>
         <button class="cover-hero-cta cover-fade d3" type="button" data-cover-open>
-          <span class="cover-hero-cta-label">点亮<br>三处光</span>
+          <span class="cover-hero-cta-label">LIGHT<br>THE THREE</span>
           <span class="cover-hero-cta-line"></span>
         </button>
       </div>
 
       <div class="cover-hint cover-fade d3">
-        <span class="zh">触碰海面的三处光</span>TOUCH THE LIGHTS ON THE SEA
+        TOUCH THE LIGHTS ON THE SEA
       </div>
     </div>
 
@@ -287,10 +300,10 @@
   </style>
 
   <div class="stonebox" id="stonebox" aria-hidden="true">
-    <div class="stonebox-kicker">潜入云空间</div>
+    <div class="stonebox-kicker">ENTER CLOUDSPACE</div>
     <form class="stonebox-row" id="stonebox-form">
-      <input class="stonebox-input" id="stonebox-pw" type="password" autocomplete="current-password" placeholder="访问密码" aria-label="访问密码" required>
-      <button class="stonebox-key" id="stonebox-submit" type="submit" aria-label="潜入">
+      <input class="stonebox-input" id="stonebox-pw" type="password" autocomplete="current-password" placeholder="Access key" aria-label="Access key" required>
+      <button class="stonebox-key" id="stonebox-submit" type="submit" aria-label="Enter">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 6l6 6-6 6"></path></svg>
       </button>
     </form>
@@ -299,7 +312,7 @@
 
   <div class="fusiongate" id="fusiongate" aria-hidden="true">
     <button class="fusiongate-x" type="button" data-fusiongate-close aria-label="关闭">&times;</button>
-    <iframe id="fusiongate-frame" title="FusionSearch 访问" allow="autoplay"></iframe>
+    <iframe id="fusiongate-frame" title="FusionSearch Access" allow="autoplay"></iframe>
   </div>
 
   <script>
@@ -342,8 +355,8 @@
         body: new URLSearchParams({ password: sbPw.value, next: '/cloudspace/' }), credentials: 'same-origin', redirect: 'manual'
       }).then(function (r) {
         if (r.type === 'opaqueredirect' || r.ok) { window.location.href = '/cloudspace/'; return; }
-        sbSubmit.disabled = false; sbShake(r.status === 401 ? '密码不对' : ('失败 ' + r.status));
-      }).catch(function () { sbSubmit.disabled = false; sbShake('网络异常'); });
+        sbSubmit.disabled = false; sbShake(r.status === 401 ? 'Wrong key' : ('Failed ' + r.status));
+      }).catch(function () { sbSubmit.disabled = false; sbShake('Network error'); });
     });
 
     // ---------- 右海 → fusion Jinx 眼睛门(全屏 iframe 浮层) ----------

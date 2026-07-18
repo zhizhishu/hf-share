@@ -159,24 +159,28 @@ function boot() {
   window.addEventListener("pointermove", onMove)
 
   // ---- 手机端视差:陀螺仪(deviceorientation)驱动同一个 target,倾斜手机即视差 ----
+  // 首帧作基准,之后按"相对基准"的倾角算 → 与握持角度无关;/24 满量程,微倾即动。
+  let tiltBase = null
   const onTilt = (e) => {
     if (e == null || (e.gamma == null && e.beta == null)) return
-    // gamma 左右倾斜(-90..90)→x;beta 前后倾斜(竖握约 45°基准)→y。夹在 [-0.5, 0.5]。
-    target.x = Math.max(-0.5, Math.min(0.5, (e.gamma || 0) / 45))
-    target.y = Math.max(-0.5, Math.min(0.5, ((e.beta || 0) - 45) / 45))
+    if (!tiltBase) tiltBase = { g: e.gamma || 0, b: e.beta || 0 }
+    target.x = Math.max(-0.5, Math.min(0.5, ((e.gamma || 0) - tiltBase.g) / 24))
+    target.y = Math.max(-0.5, Math.min(0.5, ((e.beta || 0) - tiltBase.b) / 24))
   }
   window.addEventListener("deviceorientation", onTilt)
-  // iOS 13+ 需用户手势里申请陀螺仪权限;首次触摸时尝试,失败静默(降级为无视差)。
+  // iOS 13+ 需在用户手势里申请陀螺仪权限;首次任意交互(touchstart/pointerdown/click)都试一次。
+  let tiltAsked = false
   const enableTilt = () => {
+    if (tiltAsked) return
+    tiltAsked = true
     try {
       const D = window.DeviceOrientationEvent
       if (D && typeof D.requestPermission === "function") {
         D.requestPermission().then((s) => { if (s === "granted") window.addEventListener("deviceorientation", onTilt) }).catch(() => {})
       }
     } catch (_) {}
-    window.removeEventListener("touchend", enableTilt)
   }
-  window.addEventListener("touchend", enableTilt, { passive: true })
+  ;["touchstart", "pointerdown", "click"].forEach((ev) => window.addEventListener(ev, enableTilt, { passive: true }))
 
   const resize = () => {
     w = window.innerWidth; h = window.innerHeight
