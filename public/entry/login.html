@@ -295,12 +295,12 @@
     @keyframes sbShake { 0%,100% { transform: translate(-50%,0); } 20%,60% { transform: translate(calc(-50% - 6px),0); } 40%,80% { transform: translate(calc(-50% + 6px),0); } }
 
     /* 右海 → fusion Jinx 视频眼睛门:全屏 iframe 浮层(眼睛解锁嵌在视频里) */
-    .fusiongate, .mailgate { position: fixed; inset: 0; z-index: 45; display: none; background: #04070d; }
-    .fusiongate.is-open, .mailgate.is-open { display: block; animation: sbFade .35s ease both; }
-    .fusiongate iframe, .mailgate iframe { width: 100%; height: 100%; border: 0; display: block; }
-    .fusiongate-x, .mailgate-x { position: fixed; z-index: 60; top: 20px; right: 22px; width: 36px; height: 36px; border: 0; background: none; color: rgba(206,228,255,.7); font-size: 27px; line-height: 1; cursor: pointer; transition: color .3s; display: none; }
-    .fusiongate.is-open .fusiongate-x, .mailgate.is-open .mailgate-x { display: block; }
-    .fusiongate-x:hover, .mailgate-x:hover { color: var(--fg); }
+    .fusiongate { position: fixed; inset: 0; z-index: 45; display: none; background: #04070d; }
+    .fusiongate.is-open { display: block; animation: sbFade .35s ease both; }
+    .fusiongate iframe { width: 100%; height: 100%; border: 0; display: block; }
+    .fusiongate-x { position: fixed; z-index: 60; top: 20px; right: 22px; width: 36px; height: 36px; border: 0; background: none; color: rgba(206,228,255,.7); font-size: 27px; line-height: 1; cursor: pointer; transition: color .3s; display: none; }
+    .fusiongate.is-open .fusiongate-x { display: block; }
+    .fusiongate-x:hover { color: var(--fg); }
     @keyframes sbFade { from { opacity: 0; } to { opacity: 1; } }
   </style>
 
@@ -318,11 +318,6 @@
   <div class="fusiongate" id="fusiongate" aria-hidden="true">
     <button class="fusiongate-x" type="button" data-fusiongate-close aria-label="关闭">&times;</button>
     <iframe id="fusiongate-frame" title="FusionSearch Access" allow="autoplay"></iframe>
-  </div>
-
-  <div class="mailgate" id="mailgate" aria-hidden="true">
-    <button class="mailgate-x" type="button" data-mailgate-close aria-label="关闭">&times;</button>
-    <iframe id="mailgate-frame" title="ClawMail"></iframe>
   </div>
 
   <script>
@@ -382,27 +377,13 @@
       try { fgFrame.contentWindow.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeFusion(); }); } catch (e) {}
     });
 
-    // ---------- 左海 → clawemail 静态简介页(全屏 iframe 浮层) ----------
-    var mg = document.getElementById('mailgate');
-    var mgFrame = document.getElementById('mailgate-frame');
-    var mgLoaded = false;
-    function openMail() {
-      if (!mgLoaded) { mgFrame.src = '/entry/intro-clawemail.html'; mgLoaded = true; }
-      mg.classList.add('is-open'); mg.setAttribute('aria-hidden', 'false');
-    }
-    function closeMail() { mg.classList.remove('is-open'); mg.setAttribute('aria-hidden', 'true'); }
-    if (mgFrame) mgFrame.addEventListener('load', function () {
-      try { mgFrame.contentWindow.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeMail(); }); } catch (e) {}
-    });
-
     // ---------- 捕获阶段拦热点(先于 cover.bundle.js 跳转) ----------
+    // 左海(#hotspot-email)不再拦:放行给 cover.bundle.js 原生 goEntry → 带离场动效直跳 /clawemail/。
     document.addEventListener('click', function (e) {
       if (!e.target.closest) return;
       if (e.target.closest('[data-fusiongate-close]')) { e.preventDefault(); e.stopPropagation(); closeFusion(); return; }
-      if (e.target.closest('[data-mailgate-close]')) { e.preventDefault(); e.stopPropagation(); closeMail(); return; }
       if (e.target.closest('#hotspot-cloud, [data-cover-open]')) { e.preventDefault(); e.stopPropagation(); openStone(); return; }
       if (e.target.closest('#hotspot-fusion')) { e.preventDefault(); e.stopPropagation(); openFusion(); return; }
-      if (e.target.closest('#hotspot-email')) { e.preventDefault(); e.stopPropagation(); openMail(); return; }
     }, true);
     // 点框架外的海面 → 关小框架(石头点击已在捕获阶段 stopProp,不会误关刚开的框)
     document.addEventListener('click', function (e) {
@@ -412,7 +393,6 @@
       if (e.key !== 'Escape') return;
       if (sb.classList.contains('is-open')) closeStone();
       else if (fg.classList.contains('is-open')) closeFusion();
-      else if (mg.classList.contains('is-open')) closeMail();
     });
   })();
   </script>
