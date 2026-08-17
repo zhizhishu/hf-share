@@ -153,7 +153,7 @@ WORKDIR /fusion
 # 更新时必定失效重拉。否则 `git clone ... main` 指令字符串恒定，Docker layer cache 会把
 # clone 锁死在旧 commit —— push 了新代码，build 却仍用旧源码（实测踩坑：三入口路由不更新）。
 ADD https://api.github.com/repos/zhizhishu/fusionsearch-mcp/commits/${FUSION_REF} /tmp/.fusion-ref.json
-RUN echo "fusion-clone-cachebust=2026-08-16-pplx-block-schema-v1 (重拉 fusion main: 兼容新版 blocks SSE 回答与来源)" \
+RUN echo "fusion-clone-cachebust=2026-08-17-pplx-boot-warmup-besteffort-v1 (blocks SSE + auth warm-up no longer kills :8001)" \
     && git clone --depth 1 --branch "${FUSION_REF}" \
         https://github.com/zhizhishu/fusionsearch-mcp.git . \
     && rm -rf .git
