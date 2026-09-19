@@ -61,7 +61,7 @@ ARG CLOUDSPACE_REF=main
 WORKDIR /cloudspace
 # cache-bust: commits API 随最新 commit 变、使下方 clone 层失效重拉（防 layer cache 锁死旧代码）
 ADD https://api.github.com/repos/zhizhishu/cloudspace/commits/${CLOUDSPACE_REF} /tmp/.cloudspace-ref.json
-RUN echo "cloudspace-clone-cachebust=2026-07-26-cover-stonebox-embed (buildx ADD-url缓存不可靠,改RUN文本硬破clone层重拉main;本次重拉含 /cloudspace/ 封面水晶解锁改内嵌跟随小框 commit 1ca310d)" \
+RUN echo "cloudspace-clone-cachebust=2026-09-19-rebrand-drop-stale-platform-keep (移除失效 KEEP 断言 Platform:Sub-Store —— 上游 2.37+ 的 latest bundle 已无该字面量,缓存失效后必炸构建; 本次重拉含 cloudspace commit e9a7eda)" \
     && git clone --depth 1 --branch "${CLOUDSPACE_REF}" \
         https://github.com/zhizhishu/cloudspace.git . \
     && rm -rf .git
