@@ -61,7 +61,7 @@ ARG CLOUDSPACE_REF=main
 WORKDIR /cloudspace
 # cache-bust: commits API 随最新 commit 变、使下方 clone 层失效重拉（防 layer cache 锁死旧代码）
 ADD https://api.github.com/repos/zhizhishu/cloudspace/commits/${CLOUDSPACE_REF} /tmp/.cloudspace-ref.json
-RUN echo "cloudspace-clone-cachebust=2026-09-23-spa-static-unlock (Vite crossorigin 模块脚本不带 cookie 导致白屏; 访问锁放行静态资源 GET, HTML/API 仍锁; 封面动画拦截不动)" \
+RUN echo "cloudspace-clone-cachebust=2026-09-23-spa-strip-origin (静态资源转发剥 Origin, 避开上游 CORS origin not allowed; 含 8900149)" \
     && git clone --depth 1 --branch "${CLOUDSPACE_REF}" \
         https://github.com/zhizhishu/cloudspace.git . \
     && rm -rf .git
