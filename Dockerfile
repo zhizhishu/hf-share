@@ -61,7 +61,7 @@ ARG CLOUDSPACE_REF=main
 WORKDIR /cloudspace
 # cache-bust: commits API 随最新 commit 变、使下方 clone 层失效重拉（防 layer cache 锁死旧代码）
 ADD https://api.github.com/repos/zhizhishu/cloudspace/commits/${CLOUDSPACE_REF} /tmp/.cloudspace-ref.json
-RUN echo "cloudspace-clone-cachebust=2026-09-23-spa-strip-origin (静态资源转发剥 Origin, 避开上游 CORS origin not allowed; 含 8900149)" \
+RUN echo "cloudspace-clone-cachebust=2026-09-23-strip-origin-all (所有上游转发剥 Origin, 含 API; 修 axios 403 CORS origin not allowed)" \
     && git clone --depth 1 --branch "${CLOUDSPACE_REF}" \
         https://github.com/zhizhishu/cloudspace.git . \
     && rm -rf .git
