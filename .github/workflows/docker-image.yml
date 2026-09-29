@@ -38,6 +38,18 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha,prefix=sha-
 
+      - name: Resolve icloud-hme ref
+        id: icloud
+        run: |
+          sha="$(curl -fsSL -H "Authorization: Bearer ${{ secrets.ICLOUD_HME_PAT }}" \
+            "https://api.github.com/repos/zhizhishu/icloud-hme/commits/claw-gate" \
+            | jq -r '.sha')"
+          if [ -z "$sha" ] || [ "$sha" = "null" ]; then
+            echo "无法解析 icloud-hme@claw-gate SHA（检查 ICLOUD_HME_PAT secret）" >&2
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -49,3 +61,6 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          build-args: |
+            ICLOUD_HME_SHA=${{ steps.icloud.outputs.sha }}
+            ICLOUD_HME_PAT=${{ secrets.ICLOUD_HME_PAT }}

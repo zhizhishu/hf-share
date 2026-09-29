@@ -41,6 +41,35 @@ RUN VITE_API_BASE=/clawemail npm run build
 RUN npm prune --omit=dev
 
 # ============================================================================
+# iCloud HME 引擎（icloud-hme）构建阶段 —— ClawEmail 面板的 iCloud 隐藏邮箱源。
+# 纯协议实现(tls-client TLS 指纹,零浏览器二进制,HF 镜像红线合规)。
+# ⚠️ 私库 zhizhishu/icloud-hme：clone 需要 PAT（workflow 从 secret 注入 build arg）。
+#    cachebust 不能用匿名 GitHub API ADD(私库 404)——改用 ARG SHA 进 RUN 缓存键：
+#    workflow 每次解析 claw-gate 最新 SHA 传入,新提交必重拉。
+# 产物 = 单个静态 Go 二进制(前端已 go:embed 内嵌,运行时无 Node 依赖)。
+# ============================================================================
+# ---- icloud-web-builder：引擎管理前端(vite) → internal/webui/dist ----
+FROM node:22-alpine AS icloud-web-builder
+ARG ICLOUD_HME_SHA
+ARG ICLOUD_HME_PAT
+RUN apk add --no-cache git ca-certificates
+WORKDIR /src
+RUN echo "cachebust sha=${ICLOUD_HME_SHA}" \
+    && git clone "https://x-access-token:${ICLOUD_HME_PAT}@github.com/zhizhishu/icloud-hme.git" . \
+    && git checkout "${ICLOUD_HME_SHA}"
+WORKDIR /src/web
+RUN npm ci && npm run build
+
+# ---- icloud-builder：Go 编译(CGO_ENABLED=0 静态,内嵌前端) ----
+FROM golang:1.26-alpine AS icloud-builder
+RUN apk add --no-cache git ca-certificates
+WORKDIR /build
+COPY --from=icloud-web-builder /src/go.mod /src/go.sum ./
+RUN go mod download
+COPY --from=icloud-web-builder /src/ .
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /out/icloud-hme .
+
+# ============================================================================
 # CloudSpace（Sub-Store 订阅栈）构建阶段 —— 整合自 cloudspace/Dockerfile。
 # 忠实保留品牌隐藏 rebrand 的「构建期洗白」层：
 #   scripts/rebrand.js  洗 Nebula(前端 dist) + Cumulus(底核 bundle) + Stratus(Script-Hub)
@@ -213,6 +242,9 @@ COPY --from=claw-builder /claw/package*.json /app/mail/
 RUN mkdir -p /app/config /app/logs /app/mail/data \
     && chmod +x /app/deploy/hf-allinone/start.sh
 
+# iCloud HME 引擎：单个静态二进制 → /app/icloud-hme（数据目录运行期建,冷启动从 Supabase 恢复）。
+COPY --from=icloud-builder /out/icloud-hme /app/icloud-hme/icloud-hme
+
 # ==== CloudSpace（订阅栈）运行时文件 + 引擎 → /opt/app（cloudspace 原生布局，勿改）====
 # cloud-fetcher 的 /opt/app 已含: 洗白后的 frontend/、cloudspace-core.bundle.js、
 # http-meta/(bundle+tpl)、data/、scripts/(build 期脚本，下方清理)。
@@ -238,6 +270,7 @@ RUN mkdir -p /opt/app/data \
 
 # 对外端口 = clawemail Space 原 app_port 3000（fusion node 监听；HF 会注入 PORT=3000）。
 # 容器内：fusion node :3000(对外) / clawemail :3100(内部,MOUNT_MAIL=on 反代 /clawemail) /
+#   iCloud HME 引擎 :8081(内部,MOUNT_ICLOUD=on,clawemail 服务器直连,不经反代) /
 #   CloudSpace 网关 :7861(内部,MOUNT_SUBSTORE=on 反代 /cloudspace) / core :3200 /
 #   Cirrus(http-meta) :9876 / Stratus :9100+9101 / SearXNG :8080 / search2api :8000 / pplx :8001。
 EXPOSE 3000
