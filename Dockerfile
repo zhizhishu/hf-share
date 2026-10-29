@@ -30,6 +30,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 # cache-bust：同 fusion-src，commits API 使 ClawEmail 源码更新时下方 clone 层必重拉。
 ADD https://api.github.com/repos/zhizhishu/ClawEmail/commits/${CLAWEMAIL_REF} /tmp/.clawemail-ref.json
+# 本次构建对应的 ClawEmail 提交：5bc192e（icloud 面板直连 IMAP 取正文 + FAIL_LIMIT=10 + UI 弹层/导航）
 # clone-at-build：clawemail 唯一真源 = zhizhishu/ClawEmail（不再 vendored mail/ 拷贝）
 RUN git clone --depth 1 --branch "${CLAWEMAIL_REF}" \
         https://github.com/zhizhishu/ClawEmail.git . \
