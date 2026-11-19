@@ -38,17 +38,30 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha,prefix=sha-
 
-      - name: Resolve icloud-hme ref
-        id: icloud
+      - name: Read build revisions
+        id: revisions
+        shell: bash
         run: |
-          sha="$(curl -fsSL -H "Authorization: Bearer ${{ secrets.ICLOUD_HME_PAT }}" \
-            "https://api.github.com/repos/zhizhishu/icloud-hme/commits/claw-gate" \
-            | jq -r '.sha')"
-          if [ -z "$sha" ] || [ "$sha" = "null" ]; then
-            echo "无法解析 icloud-hme@claw-gate SHA（检查 ICLOUD_HME_PAT secret）" >&2
-            exit 1
-          fi
-          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          expected = {"FUSION_SHA", "CLAWEMAIL_SHA", "CLOUDSPACE_SHA", "ICLOUD_HME_SHA"}
+          revisions = {}
+          for line in Path("repos.lock").read_text(encoding="utf-8").splitlines():
+              if not line.strip() or line.lstrip().startswith("#"):
+                  continue
+              match = re.fullmatch(r"([A-Z_]+)=([0-9a-fA-F]{40})", line)
+              if not match or match[1] not in expected or match[1] in revisions:
+                  raise SystemExit("Invalid or duplicate repos.lock entry")
+              revisions[match[1]] = match[2]
+          if set(revisions) != expected:
+              raise SystemExit("repos.lock must contain exactly four revision keys")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              for key, value in revisions.items():
+                  print(f"{key}={value}", file=output)
+          PY
 
       - name: Build and push
         uses: docker/build-push-action@v6
@@ -62,5 +75,8 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
-            ICLOUD_HME_SHA=${{ steps.icloud.outputs.sha }}
+            FUSION_SHA=${{ steps.revisions.outputs.FUSION_SHA }}
+            CLAWEMAIL_SHA=${{ steps.revisions.outputs.CLAWEMAIL_SHA }}
+            CLOUDSPACE_SHA=${{ steps.revisions.outputs.CLOUDSPACE_SHA }}
+            ICLOUD_HME_SHA=${{ steps.revisions.outputs.ICLOUD_HME_SHA }}
             ICLOUD_HME_PAT=${{ secrets.ICLOUD_HME_PAT }}

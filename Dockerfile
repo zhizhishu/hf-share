@@ -23,17 +23,17 @@ FROM node:22-bookworm-slim AS node-runtime
 FROM node:22-bookworm-slim AS claw-builder
 WORKDIR /claw
 # better-sqlite3 原生模块编译依赖（与 clawemail 原 Dockerfile 一致，已验证可行）
-ARG CLAWEMAIL_REF=main
+# Build revisions are pinned in repos.lock.
+ARG CLAWEMAIL_SHA
 # ca-certificates 必装：node:22-bookworm-slim 默认无 CA 证书，git clone HTTPS 会 CAfile:none 验证失败
 RUN apt-get update \
     && apt-get install -y --no-install-recommends python3 make g++ git ca-certificates \
     && rm -rf /var/lib/apt/lists/*
-# cache-bust：同 fusion-src，commits API 使 ClawEmail 源码更新时下方 clone 层必重拉。
-ADD https://api.github.com/repos/zhizhishu/ClawEmail/commits/${CLAWEMAIL_REF} /tmp/.clawemail-ref.json
-# 本次构建对应的 ClawEmail 提交：cf42405（Rams 浅色改版 + 验证码读数窗；含 be526b9 iCloud 读信摘要缓存）
-# clone-at-build：clawemail 唯一真源 = zhizhishu/ClawEmail（不再 vendored mail/ 拷贝）
-RUN git clone --depth 1 --branch "${CLAWEMAIL_REF}" \
-        https://github.com/zhizhishu/ClawEmail.git . \
+RUN test "${#CLAWEMAIL_SHA}" -eq 40 && ! printf '%s' "${CLAWEMAIL_SHA}" | LC_ALL=C grep -q '[^0-9a-fA-F]' \
+    && git init . \
+    && git remote add origin https://github.com/zhizhishu/ClawEmail.git \
+    && git fetch --depth 1 origin "${CLAWEMAIL_SHA}" \
+    && git checkout --detach FETCH_HEAD \
     && npm ci
 # VITE_API_BASE=/clawemail：vite base 让静态资源引用带 /clawemail 前缀，同时前端 API/SSE/附件
 # 全走 /clawemail（api.ts 的 API_BASE 读同一个 VITE_API_BASE）。esbuild 后端 bundle 一并产出。
@@ -45,8 +45,6 @@ RUN npm prune --omit=dev
 # iCloud HME 引擎（icloud-hme）构建阶段 —— ClawEmail 面板的 iCloud 隐藏邮箱源。
 # 纯协议实现(tls-client TLS 指纹,零浏览器二进制,HF 镜像红线合规)。
 # ⚠️ 私库 zhizhishu/icloud-hme：clone 需要 PAT（workflow 从 secret 注入 build arg）。
-#    cachebust 不能用匿名 GitHub API ADD(私库 404)——改用 ARG SHA 进 RUN 缓存键：
-#    workflow 每次解析 claw-gate 最新 SHA 传入,新提交必重拉。
 # 产物 = 单个静态 Go 二进制(前端已 go:embed 内嵌,运行时无 Node 依赖)。
 # ============================================================================
 # ---- icloud-web-builder：引擎管理前端(vite) → internal/webui/dist ----
@@ -55,9 +53,11 @@ ARG ICLOUD_HME_SHA
 ARG ICLOUD_HME_PAT
 RUN apk add --no-cache git ca-certificates
 WORKDIR /src
-RUN echo "cachebust sha=${ICLOUD_HME_SHA}" \
-    && git clone "https://x-access-token:${ICLOUD_HME_PAT}@github.com/zhizhishu/icloud-hme.git" . \
-    && git checkout "${ICLOUD_HME_SHA}"
+RUN test "${#ICLOUD_HME_SHA}" -eq 40 && ! printf '%s' "${ICLOUD_HME_SHA}" | LC_ALL=C grep -q '[^0-9a-fA-F]' \
+    && git init . \
+    && git remote add origin "https://x-access-token:${ICLOUD_HME_PAT}@github.com/zhizhishu/icloud-hme.git" \
+    && git fetch --depth 1 origin "${ICLOUD_HME_SHA}" \
+    && git checkout --detach FETCH_HEAD
 WORKDIR /src/web
 RUN npm ci && npm run build
 
@@ -87,13 +87,13 @@ RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /out/icloud-hme .
 # ⚠️ 必须定义在引用它的 cloud-fetcher/cirrus-builder/scripthub stage 之前——buildx 不支持
 #    forward --from(实测报 "cannot copy from stage cloud-src, needs to be defined before")。
 FROM alpine/git AS cloud-src
-ARG CLOUDSPACE_REF=main
+ARG CLOUDSPACE_SHA
 WORKDIR /cloudspace
-# cache-bust: commits API 随最新 commit 变、使下方 clone 层失效重拉（防 layer cache 锁死旧代码）
-ADD https://api.github.com/repos/zhizhishu/cloudspace/commits/${CLOUDSPACE_REF} /tmp/.cloudspace-ref.json
-RUN echo "cloudspace-clone-cachebust=2026-09-23-strip-origin-all (所有上游转发剥 Origin, 含 API; 修 axios 403 CORS origin not allowed)" \
-    && git clone --depth 1 --branch "${CLOUDSPACE_REF}" \
-        https://github.com/zhizhishu/cloudspace.git . \
+RUN test "${#CLOUDSPACE_SHA}" -eq 40 && ! printf '%s' "${CLOUDSPACE_SHA}" | LC_ALL=C grep -q '[^0-9a-fA-F]' \
+    && git init . \
+    && git remote add origin https://github.com/zhizhishu/cloudspace.git \
+    && git fetch --depth 1 origin "${CLOUDSPACE_SHA}" \
+    && git checkout --detach FETCH_HEAD \
     && rm -rf .git
 
 # ---- Nebula(前端) + Cumulus(底核): 取 release 产物 → rebrand 洗白 → 子路径 re-host ----
@@ -177,15 +177,13 @@ RUN rm -rf modules assets README.md Dockerfile dockerignore .gitignore \
 # ---- 最终 all-in-one：libregroup/libresearch (Void Linux glibc) ----
 # ---- fusion 源：clone fusionsearch-mcp（唯一真源，不再 vendored 在 claw 仓根）----
 FROM alpine/git AS fusion-src
-ARG FUSION_REF=main
+ARG FUSION_SHA
 WORKDIR /fusion
-# cache-bust：commits API 响应体随 ${FUSION_REF} 最新 commit 变化，使下方 clone 层在源码
-# 更新时必定失效重拉。否则 `git clone ... main` 指令字符串恒定，Docker layer cache 会把
-# clone 锁死在旧 commit —— push 了新代码，build 却仍用旧源码（实测踩坑：三入口路由不更新）。
-ADD https://api.github.com/repos/zhizhishu/fusionsearch-mcp/commits/${FUSION_REF} /tmp/.fusion-ref.json
-RUN echo "fusion-clone-cachebust=2026-10-27-exa-8th-source-v1 (第 8 源 Exa 纯协议语义检索；无浏览器、无代理池；自动探针不烧额度)" \
-    && git clone --depth 1 --branch "${FUSION_REF}" \
-        https://github.com/zhizhishu/fusionsearch-mcp.git . \
+RUN test "${#FUSION_SHA}" -eq 40 && ! printf '%s' "${FUSION_SHA}" | LC_ALL=C grep -q '[^0-9a-fA-F]' \
+    && git init . \
+    && git remote add origin https://github.com/zhizhishu/fusionsearch-mcp.git \
+    && git fetch --depth 1 origin "${FUSION_SHA}" \
+    && git checkout --detach FETCH_HEAD \
     && rm -rf .git
 
 FROM libregroup/libresearch:latest
