@@ -36,7 +36,7 @@ services:
       HF_WRITE_TOKEN: "${HF_WRITE_TOKEN:-}"
       GROK_API_URL: "${GROK_API_URL:-}"
       GROK_API_KEY: "${GROK_API_KEY:-}"
-      GROK_MODEL: "${GROK_MODEL:-grok-4.20-beta}"
+      GROK_MODEL: "${GROK_MODEL:-grok-4.7,grok-4.6}"
       GROK_SYSTEM_PROMPT: "${GROK_SYSTEM_PROMPT:-}"
       TAVILY_ENABLED: "${TAVILY_ENABLED:-true}"
       TAVILY_PROVIDER: "${TAVILY_PROVIDER:-}"

@@ -135,7 +135,9 @@ const fields = {
   saveHint: $('#saveHint')
 };
 
-let grokModelOptions = [];
+// 常驻候选模型（2026-11 grok-4.7 上线）：没点「读取模型」也能点卡片加降级链；
+// renderGrokModels 重绘会清掉 index.html 静态卡，选项必须种在这里才常驻。
+let grokModelOptions = ['grok-4.7', 'grok-4.6', 'grok-4.5'];
 
 function setStatus(text, kind = '') {
   fields.runtimeStatus.textContent = text;
@@ -197,7 +199,7 @@ function getGrokChain() {
 }
 
 function getCurrentGrokModel() {
-  return getGrokChain()[0] || 'grok-4.20-beta';
+  return getGrokChain()[0] || 'grok-4.7';
 }
 
 function setGrokChain(chain, { source = '', touch = true } = {}) {
@@ -642,7 +644,7 @@ async function loadConfig() {
       ? `⚠ ${lockedGrok.join(' / ')} 由 HF 环境变量注入（env 优先于运行时配置）：直接改这里只对本次运行有效，重启会被 HF 上旧值覆盖。勾上下面「同步到 HF」再保存才会连 HF 一起改掉。`
       : '';
   }
-  fields.grokModel.value = config.fusion?.grokModel || 'grok-4.20-beta';
+  fields.grokModel.value = config.fusion?.grokModel || 'grok-4.7,grok-4.6';
   renderGrokModels([], { source: '当前配置' });
   fields.grokSystemPrompt.value = config.fusion?.grokSystemPrompt || defaultGrokSystemPrompt;
   fields.tavilyEnabled.checked = config.fusion?.tavilyEnabled !== false;
@@ -685,7 +687,7 @@ async function saveConfig() {
     searchEndpoint: fields.searchEndpoint.value.trim(),
     searchShChatEndpoint: fields.searchShEndpoint.value.trim(),
     grokApiUrl: fields.grokApiUrl.value.trim(),
-    grokModel: fields.grokModel.value.trim() || 'grok-4.20-beta',
+    grokModel: fields.grokModel.value.trim() || 'grok-4.7,grok-4.6',
     syncGrokHfSecrets: fields.syncGrokHfSecrets?.checked ?? false,
     grokHfToken: fields.grokHfToken?.value.trim() || undefined,
     grokSystemPrompt: fields.grokSystemPrompt.value.trim() || defaultGrokSystemPrompt,

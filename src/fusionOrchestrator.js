@@ -19,14 +19,17 @@ export function buildEvidencePipeline({
   attempts = [],
   limit = 10
 } = {}) {
-  const normalizedSources = normalizeEvidenceItems('source', sources);
+  // 相关性基准：query 分词后的 token 集（空 query 时为空集 → 不做相关性惩罚）。
+  const queryTokens = tokenSet(query);
+  const normalizedSources = normalizeEvidenceItems('source', sources, { queryTokens });
   const normalizedFetched = normalizeEvidenceItems(
     'fetch',
     fetched.map((item) => ({
       ...item,
       content: item.content || item.preview,
       fetched: true
-    }))
+    })),
+    { queryTokens }
   );
   const normalizedBlocks = normalizeEvidenceItems(
     'evidence',
@@ -35,10 +38,14 @@ export function buildEvidencePipeline({
       provider: block.provider || 'evidence',
       content: block.content || block.text || String(block || ''),
       description: block.description || ''
-    }))
+    })),
+    { queryTokens }
   );
 
-  const merged = mergeEvidenceItems([...normalizedSources, ...normalizedFetched, ...normalizedBlocks])
+  const merged = mergeEvidenceItems(
+    [...normalizedSources, ...normalizedFetched, ...normalizedBlocks],
+    queryTokens
+  )
     .sort((left, right) => right.score - left.score)
     .slice(0, Math.max(1, limit));
   const crossCheck = buildCrossCheck({ items: merged, attempts });
@@ -61,6 +68,7 @@ export function buildResearchSynthesisPrompt(pipeline) {
     item.url ? `URL: ${item.url}` : '',
     `Providers: ${item.matchedProviders.join(', ')}`,
     `Score: ${item.score.toFixed(2)}`,
+    `Relevance: ${(item.relevance ?? 0).toFixed(2)}`,
     item.description ? `Summary: ${item.description.slice(0, MAX_DESCRIPTION_LENGTH)}` : '',
     item.content ? `Content excerpt: ${item.content.slice(0, MAX_CONTENT_LENGTH)}` : ''
   ].filter(Boolean).join('\n'));
@@ -141,6 +149,7 @@ export function formatEvidencePipeline(pipeline) {
       item.url ? `URL: ${item.url}` : '',
       `Provider: ${item.matchedProviders.join(', ')}`,
       `Score: ${item.score.toFixed(2)}`,
+      `相关性: ${(item.relevance ?? 0).toFixed(2)}`,
       item.description ? `摘要: ${item.description}` : '',
       item.content ? `内容片段: ${item.content.slice(0, 900)}` : ''
     );
@@ -160,6 +169,8 @@ function normalizeEvidenceItem(provider, item, index, options) {
   const fetched = Boolean(options.fetched || item?.fetched || item?.provider === 'fetch');
   const normalizedUrl = normalizeUrlKey(url);
   const idSeed = normalizedUrl || normalizeTitleKey(title) || `${rawProvider}-${index}`;
+  const queryTokens = options?.queryTokens;
+  const relevance = computeRelevance({ title, description, content }, queryTokens);
   const signals = {
     hasUrl: Boolean(url),
     hasTitle: Boolean(title),
@@ -176,13 +187,14 @@ function normalizeEvidenceItem(provider, item, index, options) {
     normalizedUrl,
     description,
     content,
-    score: scoreEvidence({ signals, matchedProviders: [String(rawProvider || provider)] }),
+    relevance,
+    score: scoreEvidence({ signals, matchedProviders: [String(rawProvider || provider)], relevance }, queryTokens),
     signals,
     matchedProviders: [String(rawProvider || provider)]
   };
 }
 
-function mergeEvidenceItems(items) {
+function mergeEvidenceItems(items, queryTokens) {
   const merged = [];
 
   for (const item of items) {
@@ -194,10 +206,15 @@ function mergeEvidenceItems(items) {
     mergeInto(existing, item);
   }
 
-  return merged.map((item) => ({
-    ...item,
-    score: scoreEvidence(item)
-  }));
+  return merged.map((item) => {
+    // 合并可能带来更长的 description/content，相关性要重算。
+    const relevance = computeRelevance(item, queryTokens);
+    return {
+      ...item,
+      relevance,
+      score: scoreEvidence({ ...item, relevance }, queryTokens)
+    };
+  });
 }
 
 function findDuplicate(items, item) {
@@ -306,18 +323,54 @@ export function buildCrossCheck({ items, attempts }) {
   };
 }
 
-function scoreEvidence(item) {
+// 相关性 = query token 在证据文本(title+description+content)中的命中率 [0,1]。
+// 空 queryTokens（空 query 或调用方没传基准）时返回 1，即"不惩罚"。
+// 命中判定 = 分词精确匹配 或 紧凑文本子串包含：中英混排 query（如"什么是docker"）
+// 会被切成中文 bigram，只做整词匹配会把相关英文证据误判零相关 —— 子串兜底防这种假阴性。
+function computeRelevance(item, queryTokens) {
+  if (!queryTokens?.size) return 1;
+  const rawText = [
+    item?.title || '',
+    item?.description || '',
+    item?.content || ''
+  ].join(' ');
+  const textTokens = tokenSet(rawText);
+  const compactText = rawText.toLowerCase().replace(/\s+/gu, '');
+  if (!textTokens.size && !compactText) return 0;
+  let matched = 0;
+  let eligible = 0;
+  for (const token of queryTokens) {
+    // 短纯 Latin token（"is"/"do" 等虚词与 bigram 碎片）整词和子串都极易词中误命中
+    // （th-is / do-cker），进分母只会软化相关性收益 → 跳过：不命中、不占分母。
+    if (token.length < 4 && /^[\p{Script=Latin}\p{N}]+$/u.test(token)) continue;
+    eligible += 1;
+    if (textTokens.has(token) || compactText.includes(token)) matched += 1;
+  }
+  if (!eligible) {
+    eligible = queryTokens.size;
+    for (const token of queryTokens) {
+      if (textTokens.has(token) || compactText.includes(token)) matched += 1;
+    }
+  }
+  return eligible ? matched / eligible : 1;
+}
+
+function scoreEvidence(item, queryTokens) {
   const providers = new Set(item.matchedProviders || [item.provider].filter(Boolean));
   const providerBonus = Math.max(0, providers.size - 1) * 1.4;
   const descriptionBonus = Math.min((item.description || '').length / 260, 1.2);
   const contentBonus = Math.min((item.content || '').length / 900, 1.8);
-  return 1 +
+  const structural = 1 +
     providerBonus +
     (item.signals?.hasUrl ? 0.7 : 0) +
     (item.signals?.hasTitle ? 0.3 : 0) +
     descriptionBonus +
     contentBonus +
     (item.signals?.fetched ? 1.2 : 0);
+  // 相关性乘数：完全无关 ×0.4、完全相关 ×1.3。此前纯结构分（长度/多源/抓取）
+  // 会让"又长又无关"的内容稳压"短而准"的证据 —— 多源聚合出垃圾的主因之一。
+  const relevance = item.relevance ?? computeRelevance(item, queryTokens);
+  return structural * (0.4 + 0.9 * relevance);
 }
 
 function formatTopCorroboration(topCorroboration = []) {

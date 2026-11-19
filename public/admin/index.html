@@ -248,7 +248,7 @@
               <p class="inline-hint span-2" id="grokEnvLock" hidden></p>
               <label class="field">
                 <span>模型顺序（逗号分隔）</span>
-                <input id="grokModel" type="text" autocomplete="off" spellcheck="false" placeholder="grok-4.5,grok-4.3-fast" />
+                <input id="grokModel" type="text" autocomplete="off" spellcheck="false" placeholder="grok-4.7,grok-4.6" />
                 <small>逗号分隔＝优先→降级；主模型失败自动降级下一个。也可在下方点选 / 调整顺序。</small>
               </label>
               <div class="model-picker span-2" aria-label="Grok 模型降级链">
@@ -264,6 +264,14 @@
                   <small>点击卡片加入 / 移出降级链</small>
                 </div>
                 <div class="model-card-grid" id="grokModelList">
+                  <button class="model-card" type="button" data-model-id="grok-4.7">
+                    <strong>grok-4.7</strong>
+                    <small>点击加入降级链</small>
+                  </button>
+                  <button class="model-card" type="button" data-model-id="grok-4.6">
+                    <strong>grok-4.6</strong>
+                    <small>点击加入降级链</small>
+                  </button>
                   <button class="model-card" type="button" data-model-id="grok-4.5">
                     <strong>grok-4.5</strong>
                     <small>点击加入降级链</small>

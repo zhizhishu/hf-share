@@ -4,7 +4,8 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { getSerperPublicConfig } from './serperClient.js';
 import { getExaPublicConfig } from './exaClient.js';
 
-const DEFAULT_GROK_MODEL = 'grok-4.20-beta';
+// 2026-11 grok-4.7 上线；逗号链 = 主模型(4.7)失败自动降级 4.6，防中转渠道未同步注册 4.7 时整链翻车。
+const DEFAULT_GROK_MODEL = 'grok-4.7,grok-4.6';
 const DEFAULT_TAVILY_API_URL = 'https://api.tavily.com';
 const DEFAULT_TAVILY_MCP_URL = 'https://tavily.ivanli.cc/mcp';
 const DEFAULT_FIRECRAWL_API_URL = 'https://api.firecrawl.dev/v2';

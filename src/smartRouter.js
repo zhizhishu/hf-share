@@ -265,9 +265,10 @@ export async function executeSmartResearch({
     evidenceBlocks.push({ provider: 'libresearch', title: 'LibreSearch structured results', content });
     sourceGroups.push(getLibreResultItems(libre.value.payload, effectiveLimit).map((item) => ({ ...item, provider: 'libresearch' })));
   } else {
+    // 失败信息只进 attempts(provider 状态)和展示层，不进 evidenceBlocks ——
+    // 否则错误文案会被 normalize 成"带长 content 的证据"参与打分排序并灌进 Grok 合成提示词。
     const content = `## LibreSearch\n失败: ${libre.error}`;
     evidence.push(content);
-    evidenceBlocks.push({ provider: 'libresearch', title: 'LibreSearch error', content });
   }
 
   if (search2api.ok) {
@@ -277,7 +278,6 @@ export async function executeSmartResearch({
   } else {
     const content = `## Search-2api\n失败: ${search2api.error}`;
     evidence.push(content);
-    evidenceBlocks.push({ provider: 'search2api', title: 'Search-2api error', content });
   }
 
   if (tavily.ok) {
@@ -289,7 +289,6 @@ export async function executeSmartResearch({
   } else {
     const content = `## Tavily\n失败: ${tavily.error}`;
     evidence.push(content);
-    evidenceBlocks.push({ provider: 'tavily', title: 'Tavily error', content });
   }
 
   if (perplexity.ok) {
@@ -304,10 +303,9 @@ export async function executeSmartResearch({
       })));
     }
   } else if (!isNotConfiguredError(perplexity.error)) {
-    // 未配置(第6源可选)时静默跳过，不给证据流加噪声；真失败才记录
+    // 未配置(第6源可选)时静默跳过，不给证据流加噪声；真失败才记录(仅展示层)
     const content = `## Perplexity\n失败: ${perplexity.error}`;
     evidence.push(content);
-    evidenceBlocks.push({ provider: 'perplexity', title: 'Perplexity error', content });
   }
 
   if (serper.ok) {
@@ -320,7 +318,6 @@ export async function executeSmartResearch({
   } else if (!isNotConfiguredError(serper.error)) {
     const content = `## Serper\n失败: ${serper.error}`;
     evidence.push(content);
-    evidenceBlocks.push({ provider: 'serper', title: 'Serper error', content });
   }
 
   if (exa.ok) {
@@ -333,7 +330,6 @@ export async function executeSmartResearch({
   } else if (!isNotConfiguredError(exa.error)) {
     const content = `## Exa\n失败: ${exa.error}`;
     evidence.push(content);
-    evidenceBlocks.push({ provider: 'exa', title: 'Exa error', content });
   }
 
   let sources = mergeSources(...sourceGroups).slice(0, Math.max(effectiveLimit, 1) * 2);

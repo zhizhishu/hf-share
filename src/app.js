@@ -60,7 +60,7 @@ export const DEFAULT_CONFIG = {
   searchShProjectUrl: 'https://github.com/lza6/Search-2api',
   grokApiUrl: '',
   grokApiKey: '',
-  grokModel: 'grok-4.20-beta',
+  grokModel: 'grok-4.7,grok-4.6',
   grokSystemPrompt: DEFAULT_GROK_SYSTEM_PROMPT,
   tavilyEnabled: true,
   tavilyProvider: 'rest',
