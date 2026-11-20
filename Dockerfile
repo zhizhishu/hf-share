@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1
+
 # ============================================================================
 # FusionSearch + ClawEmail 合并 all-in-one 镜像（目标：部署到 alphaeee/claw Space）
 # ----------------------------------------------------------------------------
@@ -19,6 +21,10 @@
 # ---- node 22 runtime 二进制来源（glibc/bookworm） ----
 FROM node:22-bookworm-slim AS node-runtime
 
+# public/entry 与全局 node_modules 会进最终镜像：只读 bind 预检，树内不得含 .git。
+RUN --mount=type=bind,source=public/entry,target=/run/claw-entry,ro \
+    git_entries="$(find /usr/local/lib/node_modules /run/claw-entry -name .git -print -quit)" && test -z "$git_entries"
+
 # ---- clawemail builder：编 better-sqlite3(node22 ABI) + vite build(base=/clawemail) ----
 FROM node:22-bookworm-slim AS claw-builder
 WORKDIR /claw
@@ -39,27 +45,35 @@ RUN test "${#CLAWEMAIL_SHA}" -eq 40 && ! printf '%s' "${CLAWEMAIL_SHA}" | LC_ALL
 # 全走 /clawemail（api.ts 的 API_BASE 读同一个 VITE_API_BASE）。esbuild 后端 bundle 一并产出。
 RUN VITE_API_BASE=/clawemail npm run build
 # 只留生产依赖（含已编译好的 better-sqlite3 原生模块）
-RUN npm prune --omit=dev
+RUN npm prune --omit=dev \
+    && git_entries="$(find /claw/dist /claw/node_modules -name .git -print -quit)" && test -z "$git_entries"
 
 # ============================================================================
 # iCloud HME 引擎（icloud-hme）构建阶段 —— ClawEmail 面板的 iCloud 隐藏邮箱源。
 # 纯协议实现(tls-client TLS 指纹,零浏览器二进制,HF 镜像红线合规)。
-# ⚠️ 私库 zhizhishu/icloud-hme：clone 需要 PAT（workflow 从 secret 注入 build arg）。
+# ⚠️ 私库 zhizhishu/icloud-hme：读权限走 BuildKit secret（id=icloud_hme_pat, required=true），
+#    PAT 不作 ARG/build-arg → 不进镜像 config/history/OCI provenance；仅该 RUN 内临时生效。
 # 产物 = 单个静态 Go 二进制(前端已 go:embed 内嵌,运行时无 Node 依赖)。
 # ============================================================================
 # ---- icloud-web-builder：引擎管理前端(vite) → internal/webui/dist ----
 FROM node:22-alpine AS icloud-web-builder
 ARG ICLOUD_HME_SHA
-ARG ICLOUD_HME_PAT
 RUN apk add --no-cache git ca-certificates
 WORKDIR /src
-RUN test "${#ICLOUD_HME_SHA}" -eq 40 && ! printf '%s' "${ICLOUD_HME_SHA}" | LC_ALL=C grep -q '[^0-9a-fA-F]' \
-    && git init . \
-    && git remote add origin "https://x-access-token:${ICLOUD_HME_PAT}@github.com/zhizhishu/icloud-hme.git" \
-    && git fetch --depth 1 origin "${ICLOUD_HME_SHA}" \
-    && git checkout --detach FETCH_HEAD
+RUN --mount=type=secret,id=icloud_hme_pat,required=true \
+    --mount=type=tmpfs,target=/run/icloud-fetch \
+    test "${#ICLOUD_HME_SHA}" -eq 40 && ! printf '%s' "${ICLOUD_HME_SHA}" | LC_ALL=C grep -q '[^0-9a-fA-F]' \
+    && test -s /run/secrets/icloud_hme_pat \
+    && git init /run/icloud-fetch \
+    && GIT_TERMINAL_PROMPT=0 git -C /run/icloud-fetch -c credential.helper= \
+         -c credential.helper='!f() { if [ "$1" = get ]; then printf "%s\n" "username=x-access-token" "password=$(cat /run/secrets/icloud_hme_pat)"; fi; }; f' \
+         fetch --depth 1 https://github.com/zhizhishu/icloud-hme.git "$ICLOUD_HME_SHA" \
+    && test "$(git -C /run/icloud-fetch rev-parse 'FETCH_HEAD^{commit}')" = "$(printf '%s' "$ICLOUD_HME_SHA" | tr 'A-F' 'a-f')" \
+    && git -C /run/icloud-fetch archive --format=tar --output=/run/icloud-fetch/source.tar FETCH_HEAD \
+    && tar -xf /run/icloud-fetch/source.tar -C /src
 WORKDIR /src/web
-RUN npm ci && npm run build
+RUN npm ci && npm run build \
+    && git_entries="$(find /src -name .git -print -quit)" && test -z "$git_entries"
 
 # ---- icloud-builder：Go 编译(CGO_ENABLED=0 静态,内嵌前端) ----
 FROM golang:1.26-alpine AS icloud-builder
@@ -94,7 +108,8 @@ RUN test "${#CLOUDSPACE_SHA}" -eq 40 && ! printf '%s' "${CLOUDSPACE_SHA}" | LC_A
     && git remote add origin https://github.com/zhizhishu/cloudspace.git \
     && git fetch --depth 1 origin "${CLOUDSPACE_SHA}" \
     && git checkout --detach FETCH_HEAD \
-    && rm -rf .git
+    && rm -rf .git \
+    && git_entries="$(find /cloudspace/cover -name .git -print -quit)" && test -z "$git_entries"
 
 # ---- Nebula(前端) + Cumulus(底核): 取 release 产物 → rebrand 洗白 → 子路径 re-host ----
 FROM node:20-alpine AS cloud-fetcher
@@ -136,7 +151,8 @@ RUN mkdir -p /opt/app/http-meta/meta \
     && curl -fsSL -o /opt/app/http-meta/http-meta.bundle.js \
         "https://github.com/xream/http-meta/releases/download/${HTTP_META_VERSION}/http-meta.bundle.js" \
     && curl -fsSL -o /opt/app/http-meta/meta/tpl.yaml \
-        "https://github.com/xream/http-meta/releases/download/${HTTP_META_VERSION}/tpl.yaml"
+        "https://github.com/xream/http-meta/releases/download/${HTTP_META_VERSION}/tpl.yaml" \
+    && git_entries="$(find /opt/app -name .git -print -quit)" && test -z "$git_entries"
 
 # ---- Cirrus(内核): 从源码重编 rebranded mihomo v1.19.27（静态 CGO_ENABLED=0，可跑 glibc）----
 FROM golang:1.26-alpine AS cloud-cirrus-builder
@@ -172,7 +188,8 @@ RUN rm -rf modules assets README.md Dockerfile dockerignore .gitignore \
         ignored-build-step.js SurgeModuleTool.js SurgeModuleTool_macOS.js scripts \
         pnpm-lock.yaml node_modules/script-hub node_modules/.pnpm/script-hub@file* \
     && node /tmp/rebrand.js --scripthub /opt/app/scripthub \
-    && rm -f /tmp/rebrand.js
+    && rm -f /tmp/rebrand.js \
+    && git_entries="$(find /opt/app/scripthub -name .git -print -quit)" && test -z "$git_entries"
 
 # ---- 最终 all-in-one：libregroup/libresearch (Void Linux glibc) ----
 # ---- fusion 源：clone fusionsearch-mcp（唯一真源，不再 vendored 在 claw 仓根）----
@@ -184,7 +201,8 @@ RUN test "${#FUSION_SHA}" -eq 40 && ! printf '%s' "${FUSION_SHA}" | LC_ALL=C gre
     && git remote add origin https://github.com/zhizhishu/fusionsearch-mcp.git \
     && git fetch --depth 1 origin "${FUSION_SHA}" \
     && git checkout --detach FETCH_HEAD \
-    && rm -rf .git
+    && rm -rf .git \
+    && git_entries="$(find /fusion/src /fusion/public /fusion/services /fusion/deploy -name .git -print -quit)" && test -z "$git_entries"
 
 FROM libregroup/libresearch:latest
 

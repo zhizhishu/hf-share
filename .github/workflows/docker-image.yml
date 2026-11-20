@@ -79,4 +79,6 @@ jobs:
             CLAWEMAIL_SHA=${{ steps.revisions.outputs.CLAWEMAIL_SHA }}
             CLOUDSPACE_SHA=${{ steps.revisions.outputs.CLOUDSPACE_SHA }}
             ICLOUD_HME_SHA=${{ steps.revisions.outputs.ICLOUD_HME_SHA }}
-            ICLOUD_HME_PAT=${{ secrets.ICLOUD_HME_PAT }}
+          # PAT 走 BuildKit secret（id=icloud_hme_pat），不进 build-args/provenance。
+          secrets: |
+            "icloud_hme_pat=${{ secrets.ICLOUD_HME_PAT }}"
