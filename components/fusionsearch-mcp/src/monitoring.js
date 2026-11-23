@@ -1,0 +1,576 @@
+import { executeSearch } from './searchClient.js';
+import { fetchAvailableModels, getFusionPublicConfig, resolveFusionConfig, executeTavilySearchOnly, executeFirecrawlFetch } from './fusionClients.js';
+import { getSerperPublicConfig } from './serperClient.js';
+import { getExaPublicConfig } from './exaClient.js';
+import { logEvent } from './logger.js';
+
+const MONITORED_SERVICES = [
+  { id: 'libresearch', name: 'LibreSearch', type: 'search/api' },
+  { id: 'search2api', name: 'Search-2api', type: 'chat/api' },
+  { id: 'grok', name: 'Grok', type: 'ai/api' },
+  { id: 'tavily', name: 'Tavily', type: 'search/fetch/map' },
+  { id: 'firecrawl', name: 'Firecrawl', type: 'scrape/api' },
+  { id: 'perplexity', name: 'Perplexity', type: 'ai/chat' },
+  { id: 'serper', name: 'Serper', type: 'google/serp' },
+  { id: 'exa', name: 'Exa', type: 'semantic/search' }
+];
+const PROBE_COOLDOWN_MS = 10 * 60 * 1000;
+// 状态过期阈值:记录超过 24h 视为过期。过期的 up/down 一律降级 warning(待真实调用确认)——
+// 状态只由真实调用/探针刷新(调用反馈制),一次失败后无人调用不该永远装死,一次成功后
+// 长期无调用也不该永远装活。paused(未配置)不参与降级。
+const STALE_STATUS_MS = 24 * 60 * 60 * 1000;
+
+function formatStaleAge(ts) {
+  const hours = Math.max(1, Math.floor((Date.now() - ts) / 3600000));
+  if (hours < 48) return `${hours} 小时`;
+  return `${Math.floor(hours / 24)} 天`;
+}
+
+export function createMonitoringState() {
+  const events = new Map();
+  // Per-service history ring buffer: up to MAX_HISTORY points {ts, status}.
+  // 48 points × 30-min auto-probe interval = ~24 h of coverage.
+  const MAX_HISTORY = 48;
+  const histories = new Map(MONITORED_SERVICES.map((s) => [s.id, []]));
+  let lastProbeAt = 0;
+  return {
+    record(serviceId, event = {}) {
+      const service = MONITORED_SERVICES.find((item) => item.id === serviceId);
+      if (!service) return null;
+      const normalized = normalizeMonitorEvent(serviceId, event);
+      events.set(serviceId, normalized);
+      // Append to history ring and truncate to MAX_HISTORY.
+      const hist = histories.get(serviceId) ?? [];
+      hist.push({ ts: normalized.checkedAt, status: normalized.status });
+      if (hist.length > MAX_HISTORY) hist.splice(0, hist.length - MAX_HISTORY);
+      histories.set(serviceId, hist);
+      logEvent(normalized.status === 'down' ? 'warn' : 'info', 'monitoring', 'Provider status updated', {
+        service: serviceId,
+        status: normalized.status,
+        message: normalized.message,
+        responseTimeMs: normalized.responseTimeMs,
+        source: normalized.source
+      });
+      return normalized;
+    },
+    get(serviceId) {
+      return events.get(serviceId) || null;
+    },
+    getHistory(serviceId) {
+      return histories.get(serviceId) ?? [];
+    },
+    // Returns a plain object {serviceId: [{ts, status},...]} for JSON serialization / Supabase backup.
+    exportHistory() {
+      const obj = {};
+      for (const [id, points] of histories) obj[id] = points;
+      return obj;
+    },
+    // Restores history from a previously exported plain object (e.g. from Supabase on startup).
+    importHistory(obj) {
+      if (!obj || typeof obj !== 'object') return;
+      for (const [id, points] of Object.entries(obj)) {
+        if (histories.has(id) && Array.isArray(points)) {
+          // Accept only the last MAX_HISTORY points per service.
+          histories.set(id, points.slice(-MAX_HISTORY));
+        }
+      }
+    },
+    getLastProbeAt() {
+      return lastProbeAt;
+    },
+    setLastProbeAt(value = Date.now()) {
+      lastProbeAt = value;
+    }
+  };
+}
+
+export function buildKeyStatus(config = {}) {
+  const fusion = resolveFusionConfig(config);
+  return [
+    endpointStatus('libresearchEndpoint', 'LibreSearch Endpoint', config.searchEndpoint, ['SEARCH_ENDPOINT']),
+    secretStatus('search2apiBearer', 'Search-2api Bearer', config.searchShApiKey, ['SEARCH_SH_API_KEY', 'API_MASTER_KEY']),
+    cookieStatus('search2apiCookie', 'Search-2api Cookie', process.env.SEARCH_SH_COOKIE || ''),
+    // Grok 端点/模型在 HF 上是 Variables，而 env 优先于 runtime.json —— 这两行必须能在
+    // 密钥中心直接改并写回，否则 UI 改了重启就回滚（看起来"改不动"）。
+    endpointStatus('grokApiUrl', 'Grok API URL', fusion.grokApiUrl, ['GROK_API_URL']),
+    endpointStatus('grokModel', 'Grok 模型链', fusion.grokModel, ['GROK_MODEL']),
+    secretStatus('grokApiKey', 'Grok API Key', fusion.grokApiKey, ['GROK_API_KEY']),
+    secretStatus('tavilyApiKey', 'Tavily REST Key', fusion.tavilyApiKey, ['TAVILY_API_KEY']),
+    secretStatus('tavilyMcpToken', 'Tavily MCP Token', fusion.tavilyMcpToken, ['TAVILY_MCP_TOKEN', 'TAVILY_HIKARI_TOKEN']),
+    secretStatus('firecrawlApiKey', 'Firecrawl Key', fusion.firecrawlApiKey, ['FIRECRAWL_API_KEY']),
+    endpointStatus('serperApiUrl', 'Serper API URL', config.serperApiUrl, ['SERPER_API_URL']),
+    secretStatus('serperApiKey', 'Serper API Key', config.serperApiKey, ['SERPER_API_KEY']),
+    endpointStatus('exaApiUrl', 'Exa API URL', config.exaApiUrl, ['EXA_API_URL']),
+    secretStatus('exaApiKey', 'Exa API Key', config.exaApiKey, ['EXA_API_KEY']),
+    secretStatus('adminToken', 'Admin Token', config.adminToken, ['ADMIN_TOKEN']),
+    secretStatus('mcpAuthToken', 'MCP Token', config.mcpAuthToken, ['MCP_AUTH_TOKEN']),
+    // resin 代理出口(env-only,改后需重启生效)——masked 只显示平台名+出口数,不露 token
+    proxyStatus('search2apiBaseUrl', 'Search-2api 反代 (resin)', process.env.SEARCH_SH_BASE_URL || ''),
+    proxyStatus('searxngEngineProxy', 'SearXNG 挑IP引擎代理 (resin)', process.env.SEARXNG_ENGINE_PROXY_URL || ''),
+    proxyStatus('searxngProxy', 'SearXNG 全局代理 fallback (resin)', process.env.SEARXNG_PROXY_URL || '')
+  ];
+}
+
+// Owner-only: the live plaintext value behind each key-status row, resolved the same
+// way buildKeyStatus resolves configured/masked (env var wins, then runtime config).
+// Used by the 👁 reveal in the admin key center so runtime-only values also show,
+// not just the ones injected from HF Secrets. Never logged; admin-locked endpoint only.
+export function buildKeyReveal(config = {}) {
+  const fusion = resolveFusionConfig(config);
+  const pick = (envNames, fallback) => {
+    for (const name of envNames) {
+      if (process.env[name]) return process.env[name];
+    }
+    return fallback || '';
+  };
+  return {
+    libresearchEndpoint: pick(['SEARCH_ENDPOINT'], config.searchEndpoint),
+    search2apiBearer: pick(['SEARCH_SH_API_KEY', 'API_MASTER_KEY'], config.searchShApiKey),
+    search2apiCookie: pick(['SEARCH_SH_COOKIE'], ''),
+    grokApiUrl: pick(['GROK_API_URL'], fusion.grokApiUrl),
+    grokModel: pick(['GROK_MODEL'], fusion.grokModel),
+    grokApiKey: pick(['GROK_API_KEY'], fusion.grokApiKey),
+    tavilyApiKey: pick(['TAVILY_API_KEY'], fusion.tavilyApiKey),
+    tavilyMcpToken: pick(['TAVILY_MCP_TOKEN', 'TAVILY_HIKARI_TOKEN'], fusion.tavilyMcpToken),
+    firecrawlApiKey: pick(['FIRECRAWL_API_KEY'], fusion.firecrawlApiKey),
+    serperApiUrl: pick(['SERPER_API_URL'], config.serperApiUrl),
+    serperApiKey: pick(['SERPER_API_KEY'], config.serperApiKey),
+    exaApiUrl: pick(['EXA_API_URL'], config.exaApiUrl),
+    exaApiKey: pick(['EXA_API_KEY'], config.exaApiKey),
+    adminToken: pick(['ADMIN_TOKEN'], config.adminToken),
+    mcpAuthToken: pick(['MCP_AUTH_TOKEN'], config.mcpAuthToken),
+    search2apiBaseUrl: pick(['SEARCH_SH_BASE_URL'], ''),
+    searxngEngineProxy: pick(['SEARXNG_ENGINE_PROXY_URL'], ''),
+    searxngProxy: pick(['SEARXNG_PROXY_URL'], '')
+  };
+}
+
+export function buildMonitoringSnapshot(config = {}, monitor = createMonitoringState()) {
+  const keyStatus = buildKeyStatus(config);
+  const fusion = getFusionPublicConfig(config);
+  const services = MONITORED_SERVICES.map((service) => {
+    const configured = isServiceConfigured(service.id, config, fusion, keyStatus);
+    const last = monitor.get(service.id);
+    let status = last?.status || (configured ? 'warning' : 'paused');
+    let message = last?.message || (configured ? '已配置，等待最近调用或手动探针确认' : '未配置或已关闭');
+    const lastTs = last?.checkedAt ? Date.parse(last.checkedAt) : null;
+    if (lastTs && Number.isFinite(lastTs) && Date.now() - lastTs > STALE_STATUS_MS && last.status !== 'paused') {
+      status = 'warning';
+      message = `状态已过期(${formatStaleAge(lastTs)}前的${last.status === 'up' ? '成功' : '失败'}记录),等待下次真实调用刷新`;
+    }
+    const hist = monitor.getHistory(service.id);
+    return {
+      ...service,
+      configured,
+      status,
+      statusLabel: statusLabel(status),
+      message,
+      responseTimeMs: last?.responseTimeMs ?? null,
+      checkedAt: last?.checkedAt ?? null,
+      source: last?.source || (configured ? 'config' : 'config-missing'),
+      history: hist,
+      uptime24h: computeUptime24h(hist)
+    };
+  });
+  const counts = services.reduce((acc, service) => {
+    acc[service.status] = (acc[service.status] || 0) + 1;
+    return acc;
+  }, {});
+  return {
+    ok: true,
+    count: services.length,
+    counts: {
+      up: counts.up || 0,
+      warning: counts.warning || 0,
+      down: counts.down || 0,
+      paused: counts.paused || 0
+    },
+    services,
+    keyStatus,
+    lastProbeAt: monitor.getLastProbeAt() || null
+  };
+}
+
+export async function runMonitoringProbe({ config, monitor, force = false }) {
+  const state = monitor || createMonitoringState();
+  const now = Date.now();
+  const lastProbeAt = state.getLastProbeAt();
+  if (!force && lastProbeAt && now - lastProbeAt < PROBE_COOLDOWN_MS) {
+    return {
+      ...buildMonitoringSnapshot(config, state),
+      probe: {
+        skipped: true,
+        reason: `主动探针冷却中，${Math.ceil((PROBE_COOLDOWN_MS - (now - lastProbeAt)) / 1000)} 秒后可再次运行`
+      }
+    };
+  }
+
+  state.setLastProbeAt(now);
+  await Promise.allSettled([
+    probeLibreSearch(config, state),
+    probeSearch2Api(config, state),
+    probeGrok(config, state),
+    probeTavily(config, state),
+    probeFirecrawl(config, state),
+    probePerplexity(config, state),
+    probeSerper(config, state),
+    probeExa(config, state)
+  ]);
+
+  return {
+    ...buildMonitoringSnapshot(config, state),
+    probe: {
+      skipped: false,
+      checkedAt: new Date(now).toISOString()
+    }
+  };
+}
+
+function normalizeMonitorEvent(serviceId, event) {
+  const status = event.status || (event.ok === true ? 'up' : event.ok === false ? 'down' : 'warning');
+  return {
+    serviceId,
+    status: normalizeStatus(status),
+    message: event.message || (event.ok ? '最近调用成功' : '最近调用失败'),
+    responseTimeMs: Number.isFinite(event.responseTimeMs) ? Math.max(0, Math.round(event.responseTimeMs)) : null,
+    checkedAt: event.checkedAt || new Date().toISOString(),
+    source: event.source || 'runtime'
+  };
+}
+
+function normalizeStatus(status) {
+  return ['up', 'warning', 'down', 'paused'].includes(status) ? status : 'warning';
+}
+
+function statusLabel(status) {
+  return {
+    up: 'Up',
+    warning: 'Warning',
+    down: 'Down',
+    paused: 'Paused'
+  }[status] || 'Warning';
+}
+
+// Computes uptime percentage over the stored history window.
+// Numerator: 'up' points. Denominator: active (non-paused) points.
+// Rationale: 'paused' means the service was not configured/enabled; those periods
+// are excluded so unconfigured gaps don't artificially drag down the percentage.
+// Returns null when no active data exists (nothing to measure).
+function computeUptime24h(history) {
+  const active = history.filter((p) => p.status !== 'paused');
+  if (!active.length) return null;
+  const upCount = active.filter((p) => p.status === 'up').length;
+  return Math.round((upCount / active.length) * 1000) / 10; // one decimal place, e.g. 98.5
+}
+
+function isServiceConfigured(id, config, fusion, keyStatus) {
+  const hasKey = (key) => keyStatus.find((item) => item.id === key)?.configured;
+  if (id === 'libresearch') return Boolean(config.searchEndpoint);
+  if (id === 'search2api') return Boolean(config.searchShChatEndpoint || hasKey('search2apiCookie'));
+  if (id === 'grok') return Boolean(fusion.grokApiUrl && fusion.hasGrokApiKey);
+  if (id === 'tavily') return Boolean(fusion.tavilyEnabled && fusion.hasTavilyCredentials);
+  if (id === 'firecrawl') return Boolean(fusion.hasFirecrawlApiKey);
+  if (id === 'perplexity') return Boolean(config.perplexityApiUrl);
+  if (id === 'serper') return Boolean(getSerperPublicConfig(config).hasSerperAccess);
+  if (id === 'exa') return Boolean(getExaPublicConfig(config).hasExaAccess);
+  return false;
+}
+
+async function probeLibreSearch(config, monitor) {
+  if (!config.searchEndpoint) {
+    monitor.record('libresearch', { status: 'paused', message: '未配置 LibreSearch endpoint', source: 'probe' });
+    return;
+  }
+  const startedAt = Date.now();
+  try {
+    await executeSearch({
+      endpoint: config.searchEndpoint,
+      defaultParams: config.defaultParams,
+      query: 'fusionsearch health',
+      overrides: { pageno: '1', categories: 'general' }
+    });
+    monitor.record('libresearch', {
+      ok: true,
+      message: 'LibreSearch JSON 搜索探针通过',
+      responseTimeMs: Date.now() - startedAt,
+      source: 'probe'
+    });
+  } catch (error) {
+    monitor.record('libresearch', {
+      ok: false,
+      message: error instanceof Error ? error.message : String(error),
+      responseTimeMs: Date.now() - startedAt,
+      source: 'probe'
+    });
+  }
+}
+
+async function probeSearch2Api(config, monitor) {
+  const baseUrl = getSearch2ApiBaseUrl(config.searchShChatEndpoint);
+  if (!baseUrl) {
+    monitor.record('search2api', { status: 'paused', message: '未配置 Search-2api endpoint', source: 'probe' });
+    return;
+  }
+  const startedAt = Date.now();
+  try {
+    const response = await fetchWithTimeout(`${baseUrl}/v1/models`, {
+      headers: config.searchShApiKey ? { Authorization: `Bearer ${config.searchShApiKey}` } : undefined
+    });
+    monitor.record('search2api', {
+      ok: response.ok,
+      message: response.ok ? 'Search-2api /v1/models 探针通过' : `Search-2api models 响应 ${response.status}`,
+      responseTimeMs: Date.now() - startedAt,
+      source: 'probe'
+    });
+  } catch (error) {
+    monitor.record('search2api', {
+      ok: false,
+      message: error instanceof Error ? error.message : String(error),
+      responseTimeMs: Date.now() - startedAt,
+      source: 'probe'
+    });
+  }
+}
+
+async function probeGrok(config, monitor) {
+  const fusion = getFusionPublicConfig(config);
+  if (!fusion.grokApiUrl || !fusion.hasGrokApiKey) {
+    monitor.record('grok', { status: 'paused', message: '未配置 Grok API URL 或 Key', source: 'probe' });
+    return;
+  }
+  const startedAt = Date.now();
+  try {
+    const models = await fetchAvailableModels({ config, timeoutMs: 10_000 });
+    monitor.record('grok', {
+      ok: true,
+      message: `Grok /models 探针通过，模型 ${models.length} 个`,
+      responseTimeMs: Date.now() - startedAt,
+      source: 'probe'
+    });
+  } catch (error) {
+    monitor.record('grok', {
+      ok: false,
+      message: error instanceof Error ? error.message : String(error),
+      responseTimeMs: Date.now() - startedAt,
+      source: 'probe'
+    });
+  }
+}
+
+async function probeTavily(config, monitor) {
+  const fusion = getFusionPublicConfig(config);
+  if (!fusion.tavilyEnabled || !fusion.hasTavilyCredentials) {
+    monitor.record('tavily', { status: 'paused', message: 'Tavily 未启用或未配置 Key/Token', source: 'probe' });
+    return;
+  }
+  // 只查配置：不发真实 Tavily 请求。周期性/主动探针对外真呼会让机房 IP 看起来像扫描器、
+  // 是 HF flag 的诱因之一；真实可用性由实际搜索流量体现，探针只确认已启用且凭据齐。
+  monitor.record('tavily', {
+    ok: true,
+    message: 'Tavily 已启用且凭据已配置（配置探针，未发起真实请求）',
+    responseTimeMs: 0,
+    source: 'probe'
+  });
+}
+
+async function probeFirecrawl(config, monitor) {
+  const fusion = getFusionPublicConfig(config);
+  if (!fusion.hasFirecrawlApiKey) {
+    monitor.record('firecrawl', { status: 'paused', message: '未配置 Firecrawl Key', source: 'probe' });
+    return;
+  }
+  // 只查配置：不真抓 example.com。周期性对外真呼是机房 IP 被判扫描器 / 触发 HF flag 的诱因之一；
+  // 有 Key 即视为就绪，真实可用性由实际抓取流量体现。
+  monitor.record('firecrawl', {
+    ok: true,
+    message: 'Firecrawl Key 已配置（配置探针，未发起真实抓取）',
+    responseTimeMs: 0,
+    source: 'probe'
+  });
+}
+
+async function probePerplexity(config, monitor) {
+  if (!config.perplexityApiUrl) {
+    monitor.record('perplexity', { status: 'paused', message: '未配置 PERPLEXITY_API_URL', source: 'probe' });
+    return;
+  }
+  // Derive base URL by stripping trailing /v1 suffix, then probe /pool/status or /health.
+  const base = config.perplexityApiUrl.replace(/\/v1\/?$/, '').replace(/\/$/, '');
+  const startedAt = Date.now();
+  try {
+    const response = await fetchWithTimeout(`${base}/pool/status`, { timeoutMs: 8000 });
+    monitor.record('perplexity', {
+      ok: response.ok,
+      // Treat non-200 as warning rather than down to avoid dragging overall health score.
+      status: response.ok ? 'up' : 'warning',
+      message: response.ok
+        ? 'Perplexity /pool/status 探针通过'
+        : `Perplexity /pool/status 响应 ${response.status}（标为 warning，不计入故障）`,
+      responseTimeMs: Date.now() - startedAt,
+      source: 'probe'
+    });
+  } catch {
+    // Fallback to /health; keep as warning on failure so it doesn't drag down health counts.
+    try {
+      const r2 = await fetchWithTimeout(`${base}/health`, { timeoutMs: 8000 });
+      monitor.record('perplexity', {
+        status: r2.ok ? 'up' : 'warning',
+        message: r2.ok
+          ? 'Perplexity /health 探针通过'
+          : `Perplexity /health 响应 ${r2.status}（标为 warning）`,
+        responseTimeMs: Date.now() - startedAt,
+        source: 'probe'
+      });
+    } catch (fallbackError) {
+      monitor.record('perplexity', {
+        status: 'warning',
+        message: `Perplexity 探针未到达（${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}）`,
+        responseTimeMs: Date.now() - startedAt,
+        source: 'probe'
+      });
+    }
+  }
+}
+
+// Serper 是**按次计费**的协议源（注册送 2500 次，用尽即断）：自动探针绝不真发搜索 ——
+// 30 分钟一次真探针＝一个月约 1400 次，两个月就把免费额度烧光。这里只做配置检查，
+// 真连通性验证留给 admin 手动「测试连通」(POST /api/admin/test/serper)，一次只花 1 credit。
+async function probeSerper(config, monitor) {
+  const serper = getSerperPublicConfig(config);
+  if (!serper.hasSerperAccess) {
+    monitor.record('serper', { status: 'paused', message: 'Serper 未配置 API Key', source: 'probe' });
+    return;
+  }
+  monitor.record('serper', {
+    status: 'up',
+    message: 'Serper 已配置（配置检查，未真发搜索；连通性请点「测试连通」）',
+    source: 'probe'
+  });
+}
+
+// Exa 同 Serper 纪律：按量计费（$10 免费额度、每次搜索约 $0.007），自动探针只做配置检查，
+// 真连通性走 admin 手动「测试连通」(POST /api/admin/test/exa)。
+async function probeExa(config, monitor) {
+  const exa = getExaPublicConfig(config);
+  if (!exa.hasExaAccess) {
+    monitor.record('exa', { status: 'paused', message: 'Exa 未配置 API Key', source: 'probe' });
+    return;
+  }
+  monitor.record('exa', {
+    status: 'up',
+    message: 'Exa 已配置（配置检查，未真发搜索；连通性请点「测试连通」）',
+    source: 'probe'
+  });
+}
+
+async function fetchWithTimeout(url, { headers, timeoutMs = 8000 } = {}) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      headers,
+      signal: controller.signal
+    });
+    await response.text().catch(() => '');
+    return response;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function endpointStatus(id, label, value, envNames) {
+  const source = resolveSource(envNames, value);
+  return {
+    id,
+    label,
+    configured: Boolean(value),
+    masked: value ? maskUrl(value) : '',
+    source
+  };
+}
+
+function secretStatus(id, label, configValue, envNames) {
+  const envValue = envNames.map((name) => process.env[name]).find(Boolean);
+  const value = envValue || configValue || '';
+  return {
+    id,
+    label,
+    configured: Boolean(value),
+    masked: value ? maskSecret(value) : '',
+    source: envValue ? envNames.find((name) => process.env[name] === envValue) : configValue ? 'runtime' : 'missing'
+  };
+}
+
+function cookieStatus(id, label, value) {
+  const hasClearance = /(?:^|;\s*)cf_clearance=/i.test(value);
+  return {
+    id,
+    label,
+    configured: Boolean(value),
+    masked: value ? `${hasClearance ? 'cf_clearance=****' : 'cookie=****'}; len ${value.length}` : '',
+    source: value ? 'SEARCH_SH_COOKIE' : 'missing',
+    meta: {
+      hasCfClearance: hasClearance,
+      hasUserAgent: Boolean(process.env.SEARCH_SH_USER_AGENT)
+    }
+  };
+}
+
+// resin 代理出口 status：masked 只暴露平台名(HighPurity/Default)+出口数，token 绝不出现。
+// 兼容两种形态：socks5://Platform.account:token@host 与 resin URL-rewrite https://host/TOKEN/Platform/...
+function proxyStatus(id, label, value) {
+  let platforms = [];
+  let outlets = 0;
+  if (value) {
+    const socks = [...value.matchAll(/socks5?:\/\/([A-Za-z0-9_-]+)\./g)].map((m) => m[1]);
+    const rewrite = [...value.matchAll(/https?:\/\/[^/]+\/[0-9a-f]{16,}\/([A-Za-z0-9_-]+)\//g)].map((m) => m[1]);
+    platforms = [...new Set([...socks, ...rewrite])];
+    outlets = (value.match(/socks5?:\/\//g) || []).length;
+  }
+  return {
+    id,
+    label,
+    configured: Boolean(value),
+    masked: value ? (platforms.length ? `${platforms.join(',')}${outlets > 1 ? ` ×${outlets}` : ''}` : 'set') : '',
+    source: value ? 'env' : 'missing'
+  };
+}
+
+function resolveSource(envNames, configValue) {
+  const envName = envNames.find((name) => process.env[name]);
+  if (envName) return envName;
+  return configValue ? 'runtime' : 'missing';
+}
+
+function maskSecret(value) {
+  const normalized = String(value).trim();
+  if (!normalized) return '';
+  if (normalized.length <= 8) return '*'.repeat(Math.min(normalized.length, 8));
+  const prefix = normalized.slice(0, Math.min(4, Math.floor(normalized.length / 3)));
+  const suffix = normalized.slice(-Math.min(4, Math.floor(normalized.length / 3)));
+  return `${prefix}****${suffix}`;
+}
+
+function maskUrl(value) {
+  try {
+    const url = new URL(value);
+    return `${url.origin}${url.pathname}`;
+  } catch {
+    return String(value).slice(0, 120);
+  }
+}
+
+function getSearch2ApiBaseUrl(endpoint) {
+  if (!endpoint) return '';
+  try {
+    const url = new URL(endpoint);
+    if (url.pathname.endsWith('/v1/chat/completions')) {
+      url.pathname = url.pathname.slice(0, -'/v1/chat/completions'.length) || '/';
+    }
+    url.search = '';
+    url.hash = '';
+    return url.toString().replace(/\/$/, '');
+  } catch {
+    return '';
+  }
+}
