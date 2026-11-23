@@ -585,6 +585,9 @@ async function callPerplexity(config, { prompt, model, timeoutMs = 45_000 }) {
     if (!content.trim()) {
       throw new Error('Perplexity 返回空内容');
     }
+    if (/sign up and repeat your request|please sign in|log in to continue/i.test(content)) {
+      throw new Error('Perplexity 登录已失效，需刷新 Cookie');
+    }
     return {
       content: content.trim(),
       model: data?.model || model || 'perplexity',

@@ -228,13 +228,29 @@ class Client:
         # can rotate exits; an optional sixth source must not crash :8001 at boot.
         logger.debug("Client initializing auth session via %s", ENDPOINT_AUTH_SESSION)
         try:
-            self.session.get(ENDPOINT_AUTH_SESSION, timeout=10)
+            self._probe_session(timeout=10)
         except Exception as error:
             logger.warning(
                 "Client auth warm-up failed on exit idx=%s (%s); deferring to query time",
                 self._exit_idx,
                 type(error).__name__,
             )
+
+    def account_hint(self) -> str:
+        """Recover the Perplexity account id for the x-pplx-account header."""
+        cookies = getattr(self, "_cookies", None) or {}
+        hint = cookies.get("__Host-pplx-last-active-account")
+        if not hint:
+            for name in cookies:
+                if name.startswith("__Secure-pplx.session."):
+                    hint = name[len("__Secure-pplx.session."):]
+                    break
+        return hint or ""
+
+    def _probe_session(self, timeout: int = 30):
+        hint = self.account_hint()
+        headers = {"x-pplx-account": hint} if hint else {}
+        return self.session.get(ENDPOINT_AUTH_SESSION, headers=headers, timeout=timeout)
 
     def _build_session(self, proxy_url):
         """Create a fresh curl_cffi session (same cookies + chrome impersonation) on the given proxy."""
@@ -258,7 +274,7 @@ class Client:
         self._session_idx = self._exit_idx
         # 新出口=新 IP，旧 cf_clearance 失效；暖一次 auth session 让 CF 重新放行（best-effort，算进 deadline）。
         try:
-            self.session.get(ENDPOINT_AUTH_SESSION, timeout=10)
+            self._probe_session(timeout=10)
         except Exception:
             pass
 
@@ -348,7 +364,7 @@ class Client:
                   or empty dict if anonymous/not logged in.
         """
         try:
-            resp = self.session.get(ENDPOINT_AUTH_SESSION, timeout=30)
+            resp = self._probe_session(timeout=30)
             if resp.ok:
                 return resp.json()
             return {}
@@ -568,7 +584,15 @@ class Client:
         # 不同模式耗时差异巨大（deep research 经常需要数分钟）。
         # 优先使用调用方显式传入的 timeout（由 ClientPool 注入），否则按 mode 兜底。
         request_timeout = timeout if timeout and timeout > 0 else get_search_timeout(mode)
-        resp = self.session.post(ENDPOINT_SSE_ASK, json=json_data, stream=True, timeout=request_timeout)
+        hint = self.account_hint()
+        extra_headers = {"x-pplx-account": hint} if hint else None
+        resp = self.session.post(
+            ENDPOINT_SSE_ASK,
+            json=json_data,
+            headers=extra_headers,
+            stream=True,
+            timeout=request_timeout,
+        )
         chunks = []
 
         def stream_response(resp):

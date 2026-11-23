@@ -3449,34 +3449,44 @@ document.getElementById('all').addEventListener('click',function(){var lines=[].
     }
     const sessionToken = typeof req.body?.session_token === 'string' ? req.body.session_token.trim() : '';
     const csrfToken = typeof req.body?.csrf_token === 'string' ? req.body.csrf_token.trim() : '';
+    const rawCookies = req.body?.cookies && typeof req.body.cookies === 'object' && !Array.isArray(req.body.cookies)
+      ? Object.fromEntries(
+        Object.entries(req.body.cookies)
+          .map(([k, v]) => [String(k).trim(), typeof v === 'string' ? v.trim() : String(v ?? '').trim()])
+          .filter(([k, v]) => k && v)
+      )
+      : null;
+    const hasExtraCookies = Boolean(rawCookies && Object.keys(rawCookies).length > 0);
     const id = (typeof req.body?.id === 'string' && req.body.id.trim()) || 'primary';
-    if (!sessionToken || !csrfToken) {
-      res.status(400).json({ error: { code: 'MISSING_TOKEN', message: 'session_token 和 csrf_token 必填' } });
+    if (!((sessionToken && csrfToken) || hasExtraCookies)) {
+      res.status(400).json({ error: { code: 'MISSING_TOKEN', message: '请提供 session_token + csrf_token 或新版 cookies 对象' } });
       return;
     }
     // 合并进现有池 config(保留 heart_beat 等)；单号场景以最新覆盖 tokens。
     let poolConfig = {};
     try { poolConfig = JSON.parse(process.env.PERPLEXITY_TOKEN_CONFIG || '{}'); } catch (e) { poolConfig = {}; }
     if (!poolConfig || typeof poolConfig !== 'object' || Array.isArray(poolConfig)) poolConfig = {};
-    poolConfig.tokens = [{ id, csrf_token: csrfToken, session_token: sessionToken }];
+    const entry = { id, csrf_token: csrfToken, session_token: sessionToken };
+    if (hasExtraCookies) entry.cookies = rawCookies;
+    poolConfig.tokens = [entry];
     const newConfigJson = JSON.stringify(poolConfig);
     process.env.PERPLEXITY_TOKEN_CONFIG = newConfigJson;
 
-    // 写 HF Secret 持久化(扛容器重启)——照 /api/admin/perplexity/cookie 的真实模式。
+    // 写 HF Secret 持久化(扛容器重启)——统一走 writeHfEntries（避免旧 writeHfSecrets ReferenceError）。
     let hfWritten = false;
     const spaceId = resolveHfSpaceId(config);
     const hfToken = resolveHfWriteToken();
     if (spaceId && hfToken) {
       try {
-        const results = await writeHfSecrets(config, {
+        const results = await writeHfEntries(config, {
           token: hfToken,
-          secrets: [{ key: 'PERPLEXITY_TOKEN_CONFIG', value: newConfigJson, description: 'Perplexity token (auto-sync)' }]
+          entries: [{ key: 'PERPLEXITY_TOKEN_CONFIG', value: newConfigJson, description: 'Perplexity token (auto-sync)' }]
         });
         hfWritten = Array.isArray(results) && results.every((item) => item.ok);
       } catch (e) { hfWritten = false; }
     }
 
-    // 热更 Python token 池 → 当前进程即时生效，不必重启。
+    // 热更 Python token 池 → 当前进程即时生效，不必重启（replace: true 覆盖同 id 凭据）。
     let hotReloaded = false;
     const pplxBase = (config.perplexityApiUrl || '').replace(/\/v1\/?$/, '').replace(/\/+$/, '');
     const pplxAdminToken = process.env.PPLX_ADMIN_TOKEN || '';
@@ -3485,7 +3495,7 @@ document.getElementById('all').addEventListener('click',function(){var lines=[].
         const r = await fetch(pplxBase + '/pool/import', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-Admin-Token': pplxAdminToken },
-          body: newConfigJson,
+          body: JSON.stringify({ ...poolConfig, replace: true }),
           signal: createTimeoutSignal(10000)
         });
         hotReloaded = r.ok;
@@ -3554,44 +3564,72 @@ document.getElementById('all').addEventListener('click',function(){var lines=[].
 
     if (!Array.isArray(parsed?.tokens) || parsed.tokens.length === 0) {
       res.status(400).json({
-        error: { code: 'INVALID_STRUCTURE', message: 'cookieJson 须含 {"tokens":[{id,csrf_token,session_token},...]}' }
+        error: { code: 'INVALID_STRUCTURE', message: '格式需包含 {"tokens":[{id, csrf_token, session_token 或 cookies}]}' }
       });
       return;
     }
-    const missingField = parsed.tokens.some(
-      (token) => !token?.id || !token?.csrf_token || !token?.session_token
-    );
+    const missingField = parsed.tokens.some((token) => {
+      const hasLegacy = Boolean(token?.csrf_token && token?.session_token);
+      const hasExtra = Boolean(
+        token?.cookies &&
+        typeof token.cookies === 'object' &&
+        !Array.isArray(token.cookies) &&
+        Object.values(token.cookies).some((v) => String(v || '').trim())
+      );
+      return !token?.id || !(hasLegacy || hasExtra);
+    });
     if (missingField) {
       res.status(400).json({
-        error: { code: 'INVALID_TOKEN_FIELDS', message: '每个 token 对象须含 id、csrf_token、session_token 字段' }
+        error: { code: 'INVALID_TOKEN_FIELDS', message: '每个账号至少要有 id，以及 csrf_token+session_token 或新版 cookies 对象' }
       });
       return;
     }
 
     const spaceId = resolveHfSpaceId(config);
     if (!spaceId) {
-      res.status(400).json({ error: { code: 'HF_SPACE_ID_MISSING', message: 'HF_SPACE_ID/SPACE_ID 未配置' } });
+      res.status(400).json({ error: { code: 'HF_SPACE_ID_MISSING', message: '未配置 Space 名称，无法写回云端密钥' } });
       return;
     }
     const token = resolveHfWriteToken();
     if (!token) {
-      res.status(400).json({ error: { code: 'HF_WRITE_TOKEN_MISSING', message: 'HF_WRITE_TOKEN 未配置，无法写回 HF Secret' } });
+      res.status(400).json({ error: { code: 'HF_WRITE_TOKEN_MISSING', message: '未配置云端写回令牌，无法保存' } });
       return;
     }
 
-    const results = await writeHfSecrets(config, {
+    const results = await writeHfEntries(config, {
       token,
-      secrets: [{ key: 'PERPLEXITY_TOKEN_CONFIG', value: raw.trim(), description: 'Perplexity token config' }]
+      entries: [{ key: 'PERPLEXITY_TOKEN_CONFIG', value: raw.trim(), description: 'Perplexity token config' }]
     });
     const ok = results.every((item) => item.ok);
+    let hotReloaded = false;
+    if (ok) {
+      process.env.PERPLEXITY_TOKEN_CONFIG = raw.trim();
+      const pplxBase = (config.perplexityApiUrl || '').replace(/\/v1\/?$/, '').replace(/\/+$/, '');
+      const pplxAdminToken = process.env.PPLX_ADMIN_TOKEN || '';
+      if (pplxBase && pplxAdminToken) {
+        try {
+          const r = await fetch(pplxBase + '/pool/import', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Admin-Token': pplxAdminToken },
+            body: JSON.stringify({ ...parsed, replace: true }),
+            signal: createTimeoutSignal(10000)
+          });
+          hotReloaded = r.ok;
+        } catch { hotReloaded = false; }
+      }
+    }
     logEvent(ok ? 'info' : 'warn', 'perplexity', 'Perplexity cookie config update finished', {
       ok,
+      hotReloaded,
       tokenCount: parsed.tokens.length
     });
     res.status(ok ? 200 : 502).json({
       ok,
+      hotReloaded,
       tokenCount: parsed.tokens.length,
-      note: ok ? '已写入 HF Secret PERPLEXITY_TOKEN_CONFIG，需重启 Space 生效。' : 'HF Secret 写入失败，请检查 HF_WRITE_TOKEN。',
+      note: ok
+        ? (hotReloaded ? '已保存并即时热更新，可直接点测试。' : '已写入云端密钥，重启服务后生效。')
+        : '写入云端密钥失败，请检查写回令牌权限。',
       results
     });
   }));
@@ -3614,7 +3652,7 @@ document.getElementById('all').addEventListener('click',function(){var lines=[].
         headers,
         body: JSON.stringify({
           model,
-          messages: [{ role: 'user', content: 'who founded Tesla' }],
+          messages: [{ role: 'user', content: (typeof req.body?.query === 'string' && req.body.query.trim()) || 'who founded Tesla' }],
           max_tokens: 200
         }),
         signal: timeout.signal
@@ -3638,6 +3676,23 @@ document.getElementById('all').addEventListener('click',function(){var lines=[].
         payload?.choices?.[0]?.text ||
         text
       ).slice(0, 500);
+      const authWall = /sign up and repeat your request|please sign in|log in to continue/i.test(snippet);
+      if (authWall) {
+        monitoring.record('perplexity', {
+          ok: false,
+          message: 'Perplexity 登录已失效（返回注册提示），请刷新账号 Cookie',
+          responseTimeMs: elapsed,
+          source: 'admin-test'
+        });
+        res.json({
+          ok: false,
+          model,
+          elapsed,
+          snippet,
+          error: { message: 'Perplexity 账号登录已失效（返回「Sign up and repeat your request」），需要重新导入登录 Cookie' }
+        });
+        return;
+      }
       monitoring.record('perplexity', {
         ok: true,
         message: 'Admin Perplexity 测试通过',

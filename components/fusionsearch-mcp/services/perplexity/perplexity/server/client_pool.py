@@ -21,6 +21,51 @@ from ..logger import get_logger
 logger = get_logger("server.client_pool")
 
 
+AUTH_COOKIE_EXACT = frozenset({"__Host-pplx-last-active-account"})
+AUTH_COOKIE_PREFIXES = ("__Secure-pplx.session.",)
+
+
+def build_account_cookies(
+    csrf_token: Optional[str] = None,
+    session_token: Optional[str] = None,
+    extra_cookies: Optional[Dict[str, Any]] = None,
+) -> Dict[str, str]:
+    """Assemble normalized auth cookie map from legacy pair and/or rolling cookies."""
+    cookies: Dict[str, str] = {}
+    csrf = (csrf_token or "").strip() if isinstance(csrf_token, str) else ""
+    sess = (session_token or "").strip() if isinstance(session_token, str) else ""
+    if csrf:
+        cookies["next-auth.csrf-token"] = csrf
+    if sess:
+        cookies["__Secure-next-auth.session-token"] = sess
+    has_extra = False
+    if isinstance(extra_cookies, dict):
+        for k, v in extra_cookies.items():
+            ks = str(k).strip()
+            vs = str(v).strip() if v is not None else ""
+            if ks and vs:
+                cookies[ks] = vs
+                has_extra = True
+    if not ((csrf and sess) or has_extra):
+        raise ValueError("Provide a csrf/session pair or non-empty cookies")
+    return cookies
+
+
+def extract_persistable_extra_cookies(
+    cookies: Dict[str, str],
+    supplied_keys: Optional[set] = None,
+) -> Dict[str, str]:
+    """Persist only auth rolling cookies plus operator-supplied keys; skip transient CF cookies."""
+    extra: Dict[str, str] = {}
+    keep_keys = supplied_keys or set()
+    for k, v in cookies.items():
+        if not v or k in ("next-auth.csrf-token", "__Secure-next-auth.session-token"):
+            continue
+        if k in AUTH_COOKIE_EXACT or any(k.startswith(p) for p in AUTH_COOKIE_PREFIXES) or k in keep_keys:
+            extra[k] = v
+    return extra
+
+
 class ClientWrapper:
     """Wrapper for Client with failure tracking, weight, and availability status."""
 
@@ -248,46 +293,66 @@ class ClientPool:
             client_id = token_entry.get("id")
             csrf_token = token_entry.get("csrf_token")
             session_token = token_entry.get("session_token")
+            extra_cookies = token_entry.get("cookies") if isinstance(token_entry.get("cookies"), dict) else None
 
-            if not all([client_id, csrf_token, session_token]):
-                raise ValueError(f"Invalid token entry in config: {token_entry}")
+            if not client_id:
+                raise ValueError(f"Invalid token entry in config: missing id")
+            try:
+                cookies = build_account_cookies(csrf_token, session_token, extra_cookies)
+            except ValueError as exc:
+                raise ValueError(f"Invalid token entry '{client_id}': {exc}") from exc
 
-            cookies = {
-                "next-auth.csrf-token": csrf_token,
-                "__Secure-next-auth.session-token": session_token,
-            }
-            self._add_client_internal(client_id, cookies)
+            self._add_client_internal(client_id, cookies, supplied_extra_keys=set(extra_cookies.keys()) if extra_cookies else None)
 
         self._mode = "pool"
 
-    def _add_client_internal(self, client_id: str, cookies: Dict[str, str]) -> None:
+    def _add_client_internal(
+        self,
+        client_id: str,
+        cookies: Dict[str, str],
+        supplied_extra_keys: Optional[set] = None,
+    ) -> None:
         """Internal method to add a client without locking."""
         client = Client(cookies)
         wrapper = ClientWrapper(client, client_id)
+        wrapper._supplied_extra_keys = set(supplied_extra_keys or ())
         self.clients[client_id] = wrapper
-        self._rotation_order.append(client_id)
+        if client_id not in self._rotation_order:
+            self._rotation_order.append(client_id)
 
     def add_client(
-        self, client_id: str, csrf_token: str, session_token: str
+        self,
+        client_id: str,
+        csrf_token: str = "",
+        session_token: str = "",
+        extra_cookies: Optional[Dict[str, str]] = None,
+        replace: bool = False,
     ) -> Dict[str, Any]:
         """
-        Add a new client to the pool at runtime.
+        Add (or replace when replace=True) a client in the pool at runtime.
 
         Returns:
             Dict with status and message
         """
+        if not client_id:
+            return {"status": "error", "message": "Missing required parameter: id"}
+        try:
+            cookies = build_account_cookies(csrf_token, session_token, extra_cookies)
+        except ValueError as exc:
+            return {"status": "error", "message": str(exc)}
+
         with self._lock:
-            if client_id in self.clients:
+            if client_id in self.clients and not replace:
                 return {
                     "status": "error",
                     "message": f"Client '{client_id}' already exists",
                 }
 
-            cookies = {
-                "next-auth.csrf-token": csrf_token,
-                "__Secure-next-auth.session-token": session_token,
-            }
-            self._add_client_internal(client_id, cookies)
+            self._add_client_internal(
+                client_id,
+                cookies,
+                supplied_extra_keys=set(extra_cookies.keys()) if isinstance(extra_cookies, dict) else None,
+            )
 
             # Update mode if transitioning from single/anonymous to pool
             if self._mode in ("single", "anonymous") and len(self.clients) > 1:
@@ -299,7 +364,7 @@ class ClientPool:
 
         return {
             "status": "ok",
-            "message": f"Client '{client_id}' added successfully",
+            "message": f"Client '{client_id}' {'updated' if replace else 'added'} successfully",
         }
 
     def remove_client(self, client_id: str) -> Dict[str, Any]:
@@ -1152,13 +1217,17 @@ class ClientPool:
             for client_id, wrapper in self.clients.items():
                 # Get the cookies from the client
                 client = wrapper.client
-                cookies = client._cookies if hasattr(client, '_cookies') else {}
-
-                tokens.append({
+                cookies = client.cookies if hasattr(client, 'cookies') else (client._cookies if hasattr(client, '_cookies') else {})
+                supplied = getattr(wrapper, "_supplied_extra_keys", None)
+                extra = extract_persistable_extra_cookies(cookies, supplied)
+                entry = {
                     "id": client_id,
                     "csrf_token": cookies.get("next-auth.csrf-token", ""),
                     "session_token": cookies.get("__Secure-next-auth.session-token", ""),
-                })
+                }
+                if extra:
+                    entry["cookies"] = extra
+                tokens.append(entry)
 
             return {
                 "heart_beat": self._heartbeat_config.copy(),
@@ -1183,17 +1252,21 @@ class ClientPool:
                 return []
 
             client = wrapper.client
-            cookies = client._cookies if hasattr(client, '_cookies') else {}
-
-            return [{
+            cookies = client.cookies if hasattr(client, 'cookies') else (client._cookies if hasattr(client, '_cookies') else {})
+            supplied = getattr(wrapper, "_supplied_extra_keys", None)
+            extra = extract_persistable_extra_cookies(cookies, supplied)
+            entry = {
                 "id": client_id,
                 "csrf_token": cookies.get("next-auth.csrf-token", ""),
                 "session_token": cookies.get("__Secure-next-auth.session-token", ""),
-            }]
+            }
+            if extra:
+                entry["cookies"] = extra
+            return [entry]
 
     def import_config(self, config: Any) -> Dict[str, Any]:
         """
-        Import token pool configuration, adding new tokens.
+        Import token pool configuration, adding or updating tokens.
 
         Args:
             config: List of tokens or Dict containing tokens array
@@ -1204,28 +1277,37 @@ class ClientPool:
         # Support both array format and object format
         if isinstance(config, list):
             tokens = config
+            replace = False
         else:
             tokens = config.get("tokens", [])
+            replace = bool(config.get("replace", True))
 
         if not tokens:
             return {"status": "error", "message": "No tokens found in config"}
 
         added = []
+        updated = []
         skipped = []
         errors = []
 
         for token_entry in tokens:
             client_id = token_entry.get("id")
-            csrf_token = token_entry.get("csrf_token")
-            session_token = token_entry.get("session_token")
+            csrf_token = token_entry.get("csrf_token") or ""
+            session_token = token_entry.get("session_token") or ""
+            raw_cookies = token_entry.get("cookies")
+            extra_cookies = raw_cookies if isinstance(raw_cookies, dict) and any(raw_cookies.values()) else None
 
-            if not all([client_id, csrf_token, session_token]):
-                errors.append(f"Invalid token entry: missing required fields")
+            if not client_id or not ((csrf_token and session_token) or extra_cookies):
+                errors.append("Invalid token entry: missing required fields")
                 continue
 
-            result = self.add_client(client_id, csrf_token, session_token)
+            existed = client_id in self.clients
+            result = self.add_client(client_id, csrf_token, session_token, extra_cookies=extra_cookies, replace=replace)
             if result.get("status") == "ok":
-                added.append(client_id)
+                if existed:
+                    updated.append(client_id)
+                else:
+                    added.append(client_id)
             else:
                 if "already exists" in result.get("message", ""):
                     skipped.append(client_id)
@@ -1233,21 +1315,24 @@ class ClientPool:
                     errors.append(f"{client_id}: {result.get('message')}")
 
         # Save to config file if available
-        if self._config_path and added:
+        if self._config_path and (added or updated):
             self._save_config()
 
         message_parts = []
         if added:
             message_parts.append(f"Added: {len(added)} token(s)")
+        if updated:
+            message_parts.append(f"Updated: {len(updated)} token(s)")
         if skipped:
             message_parts.append(f"Skipped: {len(skipped)} (already exist)")
         if errors:
             message_parts.append(f"Errors: {len(errors)}")
 
         return {
-            "status": "ok" if added or skipped else "error",
+            "status": "ok" if added or updated or skipped else "error",
             "message": "; ".join(message_parts) if message_parts else "No tokens processed",
             "added": added,
+            "updated": updated,
             "skipped": skipped,
             "errors": errors,
         }
@@ -1265,10 +1350,6 @@ class ClientPool:
                 "tokens": [],
             }
 
-            # 不要加锁，避免死锁（调用者可能已经持有锁，或者这是一个快速操作）
-            # 注意：如果其他线程正在修改 self.clients，这里可能会有并发问题
-            # 但鉴于这是只读操作，且 Python 的 GIL 保护，通常是安全的
-            # 为了更安全，复制一份引用
             with self._lock:
                 clients_copy = list(self.clients.items())
 
@@ -1279,13 +1360,18 @@ class ClientPool:
 
                 csrf = cookies.get("next-auth.csrf-token", "")
                 session = cookies.get("__Secure-next-auth.session-token", "")
-                logger.debug(f"[{client_id}] Saving config with cookies: csrf={csrf[:15]}... session={session[:15]}...")
+                supplied = getattr(wrapper, "_supplied_extra_keys", None)
+                extra = extract_persistable_extra_cookies(cookies, supplied)
+                logger.debug(f"[{client_id}] Saving config with cookies: csrf={csrf[:15]}... session={session[:15]}... extra={list(extra.keys())}")
 
-                config["tokens"].append({
+                entry = {
                     "id": client_id,
                     "csrf_token": csrf,
                     "session_token": session,
-                })
+                }
+                if extra:
+                    entry["cookies"] = extra
+                config["tokens"].append(entry)
 
             with open(self._config_path, "w", encoding="utf-8") as f:
                 json.dump(config, f, ensure_ascii=False, indent=2)

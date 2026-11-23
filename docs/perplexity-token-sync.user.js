@@ -38,23 +38,28 @@
 
   const SESSION_COOKIE = '__Secure-next-auth.session-token';
   const CSRF_COOKIE = 'next-auth.csrf-token';
+  const LAST_ACCOUNT_COOKIE = '__Host-pplx-last-active-account';
   const TOKEN_ID = 'primary';
   const RESYNC_INTERVAL_MS = 30 * 60 * 1000; // 每 30 分钟复查一次
 
-  // GM_cookie 能读 httpOnly cookie(session-token 就是 httpOnly，document.cookie 读不到)。
-  function readCookie(name) {
+  // 读取所有当前站点 Cookie（含 httpOnly 与新版滚动 __Secure-pplx.session.<uuid>）。
+  function listAllCookies() {
     return new Promise((resolve) => {
       try {
-        GM_cookie.list({ name }, (cookies, err) => {
-          if (err || !Array.isArray(cookies) || cookies.length === 0) return resolve('');
-          // 可能有多个(不同 path/domain)，取最长的值(最完整)。
-          const best = cookies.map((c) => c.value || '').sort((a, b) => b.length - a.length)[0];
-          resolve(best || '');
+        GM_cookie.list({}, (cookies, err) => {
+          if (err || !Array.isArray(cookies)) return resolve([]);
+          resolve(cookies);
         });
       } catch (e) {
-        resolve('');
+        resolve([]);
       }
     });
+  }
+
+  function pickLongest(list, name) {
+    const matches = list.filter((c) => c.name === name && c.value);
+    if (!matches.length) return '';
+    return matches.map((c) => c.value).sort((a, b) => b.length - a.length)[0] || '';
   }
 
   async function sync() {
@@ -62,23 +67,42 @@
       console.warn('[fs-sync] 还没填 SYNC_TOKEN，先去脚本里改一下');
       return;
     }
-    const session = await readCookie(SESSION_COOKIE);
-    const csrf = await readCookie(CSRF_COOKIE);
-    if (!session || !csrf) {
-      console.log('[fs-sync] cookie 未就绪(可能还没登录 Perplexity)');
+    const all = await listAllCookies();
+    const session = pickLongest(all, SESSION_COOKIE);
+    const csrf = pickLongest(all, CSRF_COOKIE);
+    const extraCookies = {};
+    const lastAccount = pickLongest(all, LAST_ACCOUNT_COOKIE);
+    if (lastAccount) extraCookies[LAST_ACCOUNT_COOKIE] = lastAccount;
+    for (const c of all) {
+      if (c.name && c.name.startsWith('__Secure-pplx.session.') && c.value) {
+        if (!extraCookies[c.name] || c.value.length > extraCookies[c.name].length) {
+          extraCookies[c.name] = c.value;
+        }
+      }
+    }
+    const hasLegacy = Boolean(session && csrf);
+    const hasRolling = Object.keys(extraCookies).some((k) => k.startsWith('__Secure-pplx.session.'));
+    if (!hasLegacy && !hasRolling) {
+      console.log('[fs-sync] 登录 Cookie 未就绪(可能还没登录 Perplexity)');
       return;
     }
     // 去重：token 没变就不重复上报。
-    const fingerprint = session.slice(-24) + '|' + csrf.slice(-24);
+    const extraFp = Object.entries(extraCookies)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([k, v]) => k + '=' + v.slice(-16))
+      .join('&');
+    const fingerprint = session.slice(-24) + '|' + csrf.slice(-24) + '|' + extraFp;
     if (GM_getValue('fs_last_fp', '') === fingerprint) {
       console.log('[fs-sync] token 未变化，跳过');
       return;
     }
+    const body = { id: TOKEN_ID, session_token: session, csrf_token: csrf };
+    if (Object.keys(extraCookies).length) body.cookies = extraCookies;
     GM_xmlhttpRequest({
       method: 'POST',
       url: SYNC_URL,
       headers: { 'Content-Type': 'application/json', 'X-Sync-Token': SYNC_TOKEN },
-      data: JSON.stringify({ id: TOKEN_ID, session_token: session, csrf_token: csrf }),
+      data: JSON.stringify(body),
       timeout: 20000,
       onload: (resp) => {
         if (resp.status === 200) {

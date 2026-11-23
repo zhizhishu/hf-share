@@ -5,14 +5,14 @@ import { getExaPublicConfig } from './exaClient.js';
 import { logEvent } from './logger.js';
 
 const MONITORED_SERVICES = [
-  { id: 'libresearch', name: 'LibreSearch', type: 'search/api' },
-  { id: 'search2api', name: 'Search-2api', type: 'chat/api' },
-  { id: 'grok', name: 'Grok', type: 'ai/api' },
-  { id: 'tavily', name: 'Tavily', type: 'search/fetch/map' },
-  { id: 'firecrawl', name: 'Firecrawl', type: 'scrape/api' },
-  { id: 'perplexity', name: 'Perplexity', type: 'ai/chat' },
-  { id: 'serper', name: 'Serper', type: 'google/serp' },
-  { id: 'exa', name: 'Exa', type: 'semantic/search' }
+  { id: 'libresearch', name: 'LibreSearch', type: '自建元搜索' },
+  { id: 'search2api', name: 'Search-2api', type: 'AI 对话检索' },
+  { id: 'grok', name: 'Grok', type: 'AI 汇总大脑' },
+  { id: 'tavily', name: 'Tavily', type: '搜索与网页抽取' },
+  { id: 'firecrawl', name: 'Firecrawl', type: '网页抓取兜底' },
+  { id: 'perplexity', name: 'Perplexity', type: 'AI 问答检索' },
+  { id: 'serper', name: 'Serper', type: 'Google 搜索' },
+  { id: 'exa', name: 'Exa', type: '语义检索' }
 ];
 const PROBE_COOLDOWN_MS = 10 * 60 * 1000;
 // 状态过期阈值:记录超过 24h 视为过期。过期的 up/down 一律降级 warning(待真实调用确认)——
@@ -244,11 +244,11 @@ function normalizeStatus(status) {
 
 function statusLabel(status) {
   return {
-    up: 'Up',
-    warning: 'Warning',
-    down: 'Down',
-    paused: 'Paused'
-  }[status] || 'Warning';
+    up: '正常',
+    warning: '待确认',
+    down: '异常',
+    paused: '未启用'
+  }[status] || '待确认';
 }
 
 // Computes uptime percentage over the stored history window.

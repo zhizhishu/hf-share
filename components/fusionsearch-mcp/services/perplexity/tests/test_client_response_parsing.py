@@ -188,5 +188,66 @@ class ClientResponseParsingTests(unittest.TestCase):
             client.search("This response must not be treated as successful", mode="auto")
 
 
+    def test_account_hint_prefers_last_active_account_and_falls_back_to_session_cookie_suffix(self):
+        client = Client.__new__(Client)
+        client._cookies = {
+            "__Host-pplx-last-active-account": "acct-from-host",
+            "__Secure-pplx.session.acct-from-session": "tok",
+        }
+        self.assertEqual(client.account_hint(), "acct-from-host")
+
+        client2 = Client.__new__(Client)
+        client2._cookies = {
+            "__Secure-pplx.session.b2f12bc5-8f30-431e-80bc-66dc3143f926": "tok",
+        }
+        self.assertEqual(client2.account_hint(), "b2f12bc5-8f30-431e-80bc-66dc3143f926")
+
+        client3 = Client.__new__(Client)
+        client3._cookies = {"__Secure-next-auth.session-token": "legacy"}
+        self.assertEqual(client3.account_hint(), "")
+
+    def test_build_account_cookies_and_persistable_filter(self):
+        from perplexity.server.client_pool import (
+            build_account_cookies,
+            extract_persistable_extra_cookies,
+        )
+
+        # Rolling cookie only is accepted
+        rolling = build_account_cookies(
+            extra_cookies={
+                "__Secure-pplx.session.u-1": "sval",
+                "__Host-pplx-last-active-account": "u-1",
+            }
+        )
+        self.assertEqual(rolling["__Secure-pplx.session.u-1"], "sval")
+        self.assertEqual(rolling["__Host-pplx-last-active-account"], "u-1")
+
+        # Empty input rejected
+        with self.assertRaises(ValueError):
+            build_account_cookies("", "", {})
+
+        # Transient CF cookies stripped while auth + operator-supplied cookies kept
+        filtered = extract_persistable_extra_cookies(
+            {
+                "__Secure-next-auth.session-token": "leg",
+                "next-auth.csrf-token": "csrf",
+                "__Secure-pplx.session.u-1": "new-sval",
+                "__Host-pplx-last-active-account": "u-1",
+                "__cf_bm": "transient",
+                "AWSALB": "transient2",
+                "custom_flag": "keepme",
+            },
+            supplied_keys={"custom_flag"},
+        )
+        self.assertEqual(
+            filtered,
+            {
+                "__Secure-pplx.session.u-1": "new-sval",
+                "__Host-pplx-last-active-account": "u-1",
+                "custom_flag": "keepme",
+            },
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

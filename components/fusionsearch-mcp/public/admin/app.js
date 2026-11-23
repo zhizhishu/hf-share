@@ -25,9 +25,11 @@ const defaultSubviews = {
   status: 'monitoring'
 };
 
-// 只读栏目（无可保存配置）：切进去时隐藏底部保存条
-const READONLY_GROUPS = new Set(['tests', 'status']);
+// 无底栏保存动作的栏目（只读页 + 自带保存按钮的独立页）
+const READONLY_GROUPS = new Set(['tests', 'status', 'mcp', 'deploy', 'security']);
+const SELF_SAVED_VIEWS = new Set(['fusion:keys', 'fusion:perplexity']);
 let currentGroup = 'sources';
+let currentSubview = 'libresearch';
 
 const legacyRoutes = {
   libresearch: ['sources', 'libresearch'],
@@ -101,8 +103,10 @@ const fields = {
   testFetchUrl: $('#testFetchUrl'),
   testMapUrl: $('#testMapUrl'),
   testFirecrawlUrl: $('#testFirecrawlUrl'),
+  testPerplexityQuery: $('#testPerplexityQuery'),
   output: $('#testOutput'),
   runtimeStatus: $('#runtimeStatus'),
+  toastHost: $('#toastHost'),
   loginPanel: $('#loginPanel'),
   adminTokenInput: $('#adminTokenInput'),
   loginHint: $('#loginHint'),
@@ -112,6 +116,10 @@ const fields = {
   healthState: $('#healthState'),
   configPath: $('#configPath'),
   configPathMirror: $('#configPathMirror'),
+  hfSpaceIdState: $('#hfSpaceIdState'),
+  hfCanWriteState: $('#hfCanWriteState'),
+  currentOriginState: $('#currentOriginState'),
+  grokInlineHint: $('#grokInlineHint'),
   adminAuthState: $('#adminAuthState'),
   mcpAuthState: $('#mcpAuthState'),
   rotateSessionSecret: $('#rotateSessionSecret'),
@@ -127,6 +135,7 @@ const fields = {
   logLimit: $('#logLimit'),
   logViewer: $('#logViewer'),
   monitoringCount: $('#monitoringCount'),
+  monitoringHeadline: $('#monitoringHeadline'),
   monitorBars: $('#monitorBars'),
   monitoringHint: $('#monitoringHint'),
   monitoringServices: $('#monitoringServices'),
@@ -135,13 +144,28 @@ const fields = {
   saveHint: $('#saveHint')
 };
 
-// 常驻候选模型（2026-11 grok-4.7 上线）：没点「读取模型」也能点卡片加降级链；
-// renderGrokModels 重绘会清掉 index.html 静态卡，选项必须种在这里才常驻。
-let grokModelOptions = ['grok-4.7', 'grok-4.6', 'grok-4.5'];
+// 常驻候选模型（2026-11 grok-4.7 主力 + 4.6 兜底；4.5 已从网关下线）
+let grokModelOptions = ['grok-4.7', 'grok-4.6'];
 
 function setStatus(text, kind = '') {
   fields.runtimeStatus.textContent = text;
   fields.runtimeStatus.className = `status-pill ${kind}`.trim();
+}
+
+function showToast(text, kind = '') {
+  if (!fields.toastHost || !text) return;
+  const item = document.createElement('div');
+  item.className = `toast-item ${kind}`.trim();
+  item.textContent = String(text);
+  fields.toastHost.append(item);
+  while (fields.toastHost.children.length > 3) {
+    fields.toastHost.firstElementChild?.remove();
+  }
+  window.setTimeout(() => item.remove(), 4200);
+}
+
+function shouldHideSaveBar(group = currentGroup, subview = currentSubview) {
+  return READONLY_GROUPS.has(group) || SELF_SAVED_VIEWS.has(`${group}:${subview}`);
 }
 
 function renderOutput(value) {
@@ -313,7 +337,7 @@ function bindKeyReveal() {
     if (card.classList.contains('revealed')) {
       code.textContent = code.dataset.masked || '未设置';
       card.classList.remove('revealed');
-      btn.textContent = '👁';
+      btn.textContent = '查看';
       btn.setAttribute('aria-label', '显示明文');
       return;
     }
@@ -322,13 +346,13 @@ function bindKeyReveal() {
       const values = await ensureRevealValues();
       const value = values[keyId];
       code.textContent = (value === undefined || value === '')
-        ? '（当前没取到值）'
+        ? '（当前未配置）'
         : value;
       card.classList.add('revealed');
-      btn.textContent = '🙈';
+      btn.textContent = '隐藏';
       btn.setAttribute('aria-label', '隐藏明文');
     } catch (error) {
-      code.textContent = `读取明文失败：${error?.message || error}`;
+      code.textContent = `读取失败：${error?.message || error}`;
     } finally {
       btn.disabled = false;
     }
@@ -341,24 +365,22 @@ function bindKeyReveal() {
 const KEY_CENTER_META = {
   libresearchEndpoint: { editable: false, hf: false },
   search2apiBearer: { editable: true, hf: true, clear: true },
-  search2apiCookie: { editable: true, hf: true, clear: false, note: '环境变量 · 存后需重启 Space 生效' },
-  // Grok 端点/模型是 HF Variables（非机密）：保存后即刻生效并写回 HF，避免重启回滚旧值。
-  grokApiUrl: { editable: true, hf: true, clear: false, plain: true, note: 'HF Variables · 保存即生效并写回；带上 /v1 前缀' },
-  grokModel: { editable: true, hf: true, clear: false, plain: true, note: 'HF Variables · 逗号分隔＝降级链，第 1 个是主模型' },
-  grokApiKey: { editable: true, hf: true, clear: true, note: 'HF Secret · 保存即生效并写回' },
+  search2apiCookie: { editable: true, hf: true, clear: false, note: '环境变量项，保存后需重启服务生效' },
+  grokApiUrl: { editable: true, hf: true, clear: false, plain: true, note: '立即生效并同步云端变量，地址需以 /v1 结尾' },
+  grokModel: { editable: true, hf: true, clear: false, plain: true, note: '英文逗号分隔优先级，排最前面的是主力模型' },
+  grokApiKey: { editable: true, hf: true, clear: true, note: '立即生效并同步云端密钥' },
   tavilyApiKey: { editable: true, hf: true, clear: true },
   tavilyMcpToken: { editable: true, hf: true, clear: true },
   firecrawlApiKey: { editable: true, hf: true, clear: true },
-  serperApiUrl: { editable: true, hf: true, clear: false, plain: true, note: 'HF Variables · 默认 https://google.serper.dev，一般不用改' },
-  serperApiKey: { editable: true, hf: true, clear: true, note: 'HF Secret · serper.dev 注册后获取；按次计费（注册送 2500 次）' },
-  exaApiUrl: { editable: true, hf: true, clear: false, plain: true, note: 'HF Variables · 默认 https://api.exa.ai，一般不用改' },
-  exaApiKey: { editable: true, hf: true, clear: true, note: 'HF Secret · dashboard.exa.ai 获取；按量计费（注册送 $10）' },
-  adminToken: { editable: true, hf: true, clear: false, note: '改后需用新口令重新登录' },
+  serperApiUrl: { editable: true, hf: true, clear: false, plain: true, note: '默认 https://google.serper.dev，通常不用改' },
+  serperApiKey: { editable: true, hf: true, clear: true, note: '按次计费，自动体检不会消耗额度' },
+  exaApiUrl: { editable: true, hf: true, clear: false, plain: true, note: '默认 https://api.exa.ai，通常不用改' },
+  exaApiKey: { editable: true, hf: true, clear: true, note: '按量计费，自动体检不会消耗额度' },
+  adminToken: { editable: true, hf: true, clear: false, note: '修改后需要用新口令重新登录' },
   mcpAuthToken: { editable: true, hf: true, clear: true },
-  // resin 代理出口(env-only)：存后需重启生效；masked 只显示平台名+出口数(如 HighPurity ×15)
-  search2apiBaseUrl: { editable: true, hf: true, clear: false, note: 'resin 反代 · 存后需重启 Space 生效' },
-  searxngEngineProxy: { editable: true, hf: true, clear: false, note: 'resin 挑IP引擎出口 · 存后需重启' },
-  searxngProxy: { editable: true, hf: true, clear: false, note: 'resin 全局 fallback · 存后需重启' }
+  search2apiBaseUrl: { editable: true, hf: true, clear: false, note: '代理出口设置，保存后需重启服务生效' },
+  searxngEngineProxy: { editable: true, hf: true, clear: false, note: '挑 IP 引擎专用代理，保存后需重启生效' },
+  searxngProxy: { editable: true, hf: true, clear: false, note: '全局兜底代理，保存后需重启生效' }
 };
 
 function renderKeyStatus(items = []) {
@@ -369,17 +391,17 @@ function renderKeyStatus(items = []) {
       const meta = KEY_CENTER_META[item.id] || { editable: false, hf: false };
       const masked = item.masked || '未设置';
       const eye = item.configured
-        ? `<button type="button" class="key-eye" aria-label="显示明文" title="显示 / 隐藏明文">👁</button>`
+        ? `<button type="button" class="key-eye" aria-label="显示明文" title="查看或隐藏明文">查看</button>`
         : '';
-      const tag = meta.hf ? '<span class="key-tag">HF</span>' : '';
+      const tag = meta.hf ? '<span class="key-tag">云端同步</span>' : '';
       const editor = meta.editable
         ? `
         <div class="key-edit">
-          <input class="key-edit-input" type="${meta.plain ? 'text' : 'password'}" autocomplete="new-password" placeholder="留空则不改，输入即替换" data-key-id="${escapeHtml(item.id)}" />
+          <input class="key-edit-input" type="${meta.plain ? 'text' : 'password'}" autocomplete="new-password" placeholder="留空不改，填写即替换" data-key-id="${escapeHtml(item.id)}" />
           ${meta.clear ? `<label class="key-clear"><input type="checkbox" class="key-clear-box" data-key-id="${escapeHtml(item.id)}" />清空</label>` : ''}
         </div>
         ${meta.note ? `<small class="key-note">${escapeHtml(meta.note)}</small>` : ''}`
-        : '<small class="key-note">在对应服务面板里修改</small>';
+        : '<small class="key-note">请在对应的基础搜索面板中修改</small>';
       return `
       <article class="key-status-card ${item.configured ? 'configured' : 'missing'}" data-key-id="${escapeHtml(item.id)}">
         <div>
@@ -391,7 +413,7 @@ function renderKeyStatus(items = []) {
         ${editor}
       </article>`;
     }).join('')
-    : '<div class="empty-note">暂无 Key 状态</div>';
+    : '<div class="empty-note">暂无密钥项</div>';
   bindKeyReveal();
 }
 
@@ -412,58 +434,108 @@ function applyHfTokenVisibility(canWrite) {
   }
 }
 
+const SERVICE_TEST_SUBVIEW = {
+  libresearch: 'libresearch-test',
+  search2api: 'search2api-test',
+  grok: 'grok-test',
+  tavily: 'tavily-test',
+  firecrawl: 'firecrawl-test',
+  perplexity: 'perplexity-test',
+  serper: 'serper-test',
+  exa: 'exa-test'
+};
+
+const SOURCE_LABEL_MAP = {
+  smart_research: '聚合搜索',
+  smart_fetch: '网页抓取',
+  probe: '体检探针',
+  'admin-test': '手动测试',
+  config: '配置检查',
+  'config-missing': '未配置',
+  runtime: '运行时'
+};
+
+const STATUS_CN_MAP = {
+  up: '正常',
+  warning: '待确认',
+  down: '异常',
+  paused: '未启用'
+};
+
 function formatKeySource(item) {
   const source = item.source || 'missing';
-  if (source === 'runtime') return 'runtime config';
-  if (source === 'missing') return 'not set';
+  if (source === 'runtime') return '来源：运行时配置';
+  if (source === 'missing') return '尚未设置';
   const meta = item.meta || {};
   const extra = item.id === 'search2apiCookie'
-    ? `; cf_clearance ${meta.hasCfClearance ? 'yes' : 'no'}; UA ${meta.hasUserAgent ? 'yes' : 'no'}`
+    ? `（含 cf_clearance：${meta.hasCfClearance ? '是' : '否'}，含 UA：${meta.hasUserAgent ? '是' : '否'}）`
     : '';
-  return `${source}${extra}`;
+  return `来源：环境变量 ${source}${extra}`;
 }
 
 function renderMonitoring(snapshot = {}) {
   const services = snapshot.services || [];
-  if (fields.monitoringCount) fields.monitoringCount.textContent = String(snapshot.count ?? services.length);
+  const counts = snapshot.counts || {};
+  const total = snapshot.count ?? services.length;
+  const upCount = counts.up || 0;
+  if (fields.monitoringCount) fields.monitoringCount.textContent = `${upCount}/${total}`;
+  if (fields.monitoringHeadline) {
+    fields.monitoringHeadline.textContent = counts.down
+      ? `正常通道数（${counts.down} 个需要处理）`
+      : '全部已启用通道运行正常';
+  }
 
-  // Summary bar: one colored dot per service.
+  // Summary bar: one clickable colored pill per service.
   if (fields.monitorBars) {
     fields.monitorBars.innerHTML = services
-      .map((service) => `<span class="monitor-bar ${escapeHtml(service.status)}" title="${escapeHtml(service.name)}: ${escapeHtml(service.statusLabel)}"></span>`)
+      .map((service) => {
+        const cn = STATUS_CN_MAP[service.status] || service.statusLabel || '待确认';
+        return `<button type="button" class="monitor-bar ${escapeHtml(service.status)}" data-jump-service="${escapeHtml(service.id)}" title="${escapeHtml(service.name)}：${escapeHtml(cn)}（点击跳转卡片）" aria-label="${escapeHtml(service.name)} ${escapeHtml(cn)}"></button>`;
+      })
       .join('');
   }
 
-  // Uptimer-style cards: one card per service with a 48-cell history grid.
+  // Service health cards with 48-slot history strip.
   if (fields.monitoringServices) {
     if (!services.length) {
-      fields.monitoringServices.innerHTML = '<div class="empty-note">暂无监控服务</div>';
+      fields.monitoringServices.innerHTML = '<div class="empty-note">暂无监控通道</div>';
     } else {
       const CELLS = 48;
       fields.monitoringServices.innerHTML = services.map((service) => {
         const history = Array.isArray(service.history) ? service.history : [];
-        // Left-pad with empty cells when fewer than 48 data points exist.
         const padded = Array(Math.max(0, CELLS - history.length)).fill(null).concat(history);
         const cells = padded.map((point) => {
           if (!point) {
-            return `<span class="history-cell empty" title="暂无数据"></span>`;
+            return `<span class="history-cell empty" title="暂无记录"></span>`;
           }
-          const label = { up: 'Up', down: 'Down', warning: 'Warning', paused: 'Paused' }[point.status] || point.status;
+          const label = STATUS_CN_MAP[point.status] || point.status;
           const ts = point.ts ? new Date(point.ts).toLocaleString('zh-CN', { hour12: false }) : '';
           return `<span class="history-cell ${escapeHtml(point.status)}" title="${escapeHtml(ts + (ts ? ' · ' : '') + label)}"></span>`;
         }).join('');
-        const uptimeText = service.uptime24h == null ? '—' : `${service.uptime24h.toFixed(1)}%`;
+        const uptimeText = service.uptime24h == null ? '暂无统计' : `可用率 ${service.uptime24h.toFixed(1)}%`;
+        const cnStatus = STATUS_CN_MAP[service.status] || service.statusLabel || '待确认';
+        const cardStateClass = service.status === 'down' ? 'is-down' : service.status === 'warning' ? 'is-warning' : '';
+        const testSubview = SERVICE_TEST_SUBVIEW[service.id];
+        const quickBtn = testSubview
+          ? `<button type="button" class="uptimer-quick-btn" data-goto-test="${escapeHtml(testSubview)}">去测试</button>`
+          : '';
         return `
-          <div class="uptimer-card">
+          <div class="uptimer-card ${cardStateClass}" id="monitor-card-${escapeHtml(service.id)}">
             <div class="uptimer-head">
-              <span class="uptimer-dot ${escapeHtml(service.status)}" title="${escapeHtml(service.statusLabel)}"></span>
-              <strong>${escapeHtml(service.name)}</strong>
-              <span class="uptimer-type">${escapeHtml(service.type)}</span>
-              <span class="uptimer-uptime">${escapeHtml(uptimeText)}</span>
-              <small class="uptimer-check">${escapeHtml(formatMonitorCheck(service))}</small>
+              <div class="uptimer-title-group">
+                <span class="uptimer-dot ${escapeHtml(service.status)}" title="${escapeHtml(cnStatus)}"></span>
+                <strong>${escapeHtml(service.name)}</strong>
+                <span class="uptimer-badge ${escapeHtml(service.status)}">${escapeHtml(cnStatus)}</span>
+                <span class="uptimer-type">${escapeHtml(service.type)}</span>
+              </div>
+              <div class="uptimer-meta-group">
+                <span class="uptimer-uptime">${escapeHtml(uptimeText)}</span>
+                <small class="uptimer-check">${escapeHtml(formatMonitorCheck(service))}</small>
+                ${quickBtn}
+              </div>
             </div>
             <div class="history-grid">${cells}</div>
-            <p class="uptimer-msg">${escapeHtml(service.message || '')}</p>
+            <p class="uptimer-msg">${escapeHtml(service.message || '等待首次调用或体检')}</p>
           </div>
         `;
       }).join('');
@@ -471,16 +543,35 @@ function renderMonitoring(snapshot = {}) {
   }
 
   if (fields.monitoringHint) {
-    const counts = snapshot.counts || {};
-    const probe = snapshot.probe?.skipped ? `；${snapshot.probe.reason}` : '';
-    fields.monitoringHint.textContent = `Up ${counts.up || 0} / Warning ${counts.warning || 0} / Down ${counts.down || 0} / Paused ${counts.paused || 0}${probe}`;
+    const parts = [
+      `正常 ${counts.up || 0}`,
+      counts.warning ? `待确认 ${counts.warning}` : '',
+      counts.down ? `异常 ${counts.down}` : '',
+      counts.paused ? `未启用 ${counts.paused}` : ''
+    ].filter(Boolean);
+    const probe = snapshot.probe?.skipped ? `（${snapshot.probe.reason}）` : '';
+    fields.monitoringHint.textContent = `${parts.join(' / ')}${probe}`;
   }
 }
 
 function formatMonitorCheck(service) {
-  const time = service.checkedAt ? formatLogTime(service.checkedAt) : 'waiting';
+  const time = service.checkedAt ? formatShortTime(service.checkedAt) : '尚未检测';
   const ms = service.responseTimeMs == null ? '' : ` · ${service.responseTimeMs}ms`;
-  return `${time}${ms} · ${service.source || 'unknown'}`;
+  const src = SOURCE_LABEL_MAP[service.source] || service.source || '运行时';
+  return `${time}${ms} · ${src}`;
+}
+
+function formatShortTime(value) {
+  if (!value) return '尚未检测';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  });
 }
 
 function hasPanel(group, subview) {
@@ -535,16 +626,16 @@ function setActiveRoute(group, subview, updateHash = true) {
     activePanel?.append(fields.output);
   }
 
-  if (targetGroup === 'status' && targetSubview === 'logs') {
+  if (targetGroup === 'status' && targetSubview === 'logs' && !workbench.hidden) {
     void loadLogs().catch(() => {});
   }
-  if (targetGroup === 'status' && targetSubview === 'monitoring') {
+  if (targetGroup === 'status' && targetSubview === 'monitoring' && !workbench.hidden) {
     void loadMonitoring().catch(() => {});
   }
-  if (targetGroup === 'fusion' && targetSubview === 'keys') {
+  if (targetGroup === 'fusion' && targetSubview === 'keys' && !workbench.hidden) {
     void loadKeyStatus().catch(() => {});
   }
-  if (targetGroup === 'fusion' && targetSubview === 'perplexity') {
+  if (targetGroup === 'fusion' && targetSubview === 'perplexity' && !workbench.hidden) {
     void loadPerplexity().catch(() => {});
   }
 
@@ -553,8 +644,9 @@ function setActiveRoute(group, subview, updateHash = true) {
     window.history.replaceState(null, '', nextHash);
   }
   currentGroup = targetGroup;
+  currentSubview = targetSubview;
   if (!workbench.hidden) {
-    saveBar.hidden = READONLY_GROUPS.has(targetGroup);
+    saveBar.hidden = shouldHideSaveBar(targetGroup, targetSubview);
   }
   window.scrollTo({ top: 0, behavior: 'instant' });
 }
@@ -575,7 +667,7 @@ function renderSession(session = {}) {
   const locked = Boolean(session.adminAuthEnabled && !session.adminAuthenticated);
   fields.loginPanel.hidden = !locked;
   workbench.hidden = locked;
-  saveBar.hidden = locked || READONLY_GROUPS.has(currentGroup);
+  saveBar.hidden = locked || shouldHideSaveBar(currentGroup, currentSubview);
   fields.logoutAdmin.hidden = !session.adminAuthEnabled || locked;
   if (fields.adminAuthState) {
     fields.adminAuthState.textContent = session.adminAuthEnabled ? (session.adminAuthenticated ? '已登录' : '需要登录') : '未启用';
@@ -583,7 +675,20 @@ function renderSession(session = {}) {
   if (fields.mcpAuthState) {
     fields.mcpAuthState.textContent = session.mcpAuthEnabled ? '已启用' : '未启用';
   }
-  setStatus(locked ? '待登录' : '读取中', locked ? '' : '');
+  setStatus(locked ? '待登录' : '连接中', '');
+}
+
+async function hydrateActiveSubview() {
+  if (workbench.hidden) return;
+  if (currentGroup === 'status' && currentSubview === 'monitoring') {
+    await loadMonitoring().catch(() => {});
+  } else if (currentGroup === 'status' && currentSubview === 'logs') {
+    await loadLogs().catch(() => {});
+  } else if (currentGroup === 'fusion' && currentSubview === 'keys') {
+    await loadKeyStatus().catch(() => {});
+  } else if (currentGroup === 'fusion' && currentSubview === 'perplexity') {
+    await loadPerplexity().catch(() => {});
+  }
 }
 
 async function refreshSession() {
@@ -594,17 +699,22 @@ async function refreshSession() {
 
 async function loginAdmin() {
   const token = fields.adminTokenInput.value.trim();
-  fields.loginHint.textContent = '登录中';
+  if (!token) {
+    fields.loginHint.textContent = '请先输入管理口令。';
+    return;
+  }
+  fields.loginHint.textContent = '正在验证口令…';
   const session = await requestJson('/api/admin/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ token })
   });
   fields.adminTokenInput.value = '';
-  fields.loginHint.textContent = '已登录';
+  fields.loginHint.textContent = '登录成功，正在载入控制台…';
   renderSession(session);
   await loadConfig();
   await checkRuntime();
+  await hydrateActiveSubview();
 }
 
 async function logoutAdmin() {
@@ -629,19 +739,28 @@ async function loadConfig() {
   fields.fusionKeyState.textContent = formatFusionKeyState(config.fusion);
   renderKeyStatus(config.keyStatus || []);
   applyHfTokenVisibility(config.hfSecrets?.canWrite);
+  if (fields.hfSpaceIdState) {
+    fields.hfSpaceIdState.textContent = config.hfSecrets?.spaceId || '未配置（本地或独立容器）';
+  }
+  if (fields.hfCanWriteState) {
+    fields.hfCanWriteState.textContent = config.hfSecrets?.canWrite ? '已就绪（保存自动回写）' : '未配置写回令牌';
+  }
+  if (fields.currentOriginState) {
+    fields.currentOriginState.textContent = window.location.origin;
+  }
   if (fields.adminAuthState) {
-    fields.adminAuthState.textContent = config.auth?.adminAuthEnabled ? '已启用' : '未启用';
+    fields.adminAuthState.textContent = config.auth?.adminAuthEnabled ? '已开启' : '未开启';
   }
   if (fields.mcpAuthState) {
-    fields.mcpAuthState.textContent = config.auth?.mcpAuthEnabled ? '已启用' : '未启用';
+    fields.mcpAuthState.textContent = config.auth?.mcpAuthEnabled ? '已开启' : '未开启';
   }
   fields.grokApiUrl.value = config.fusion?.grokApiUrl || '';
-  // 这一栏最容易踩的坑：HF 里有同名环境变量时 env 优先于 runtime.json，直接改只活到重启。
   const lockedGrok = ['grokApiUrl', 'grokModel'].filter((key) => config.envOverrides?.[key]);
   if (fields.grokEnvLock) {
     fields.grokEnvLock.hidden = !lockedGrok.length;
+    const lockedLabels = lockedGrok.map((k) => (k === 'grokApiUrl' ? '接口地址' : '模型顺序'));
     fields.grokEnvLock.textContent = lockedGrok.length
-      ? `⚠ ${lockedGrok.join(' / ')} 由 HF 环境变量注入（env 优先于运行时配置）：直接改这里只对本次运行有效，重启会被 HF 上旧值覆盖。勾上下面「同步到 HF」再保存才会连 HF 一起改掉。`
+      ? `提示：${lockedLabels.join('、')}目前由 Hugging Face 环境变量接管。勾选下方「同步写回 Hugging Face」再保存，重启后才会被永久保留。`
       : '';
   }
   fields.grokModel.value = config.fusion?.grokModel || 'grok-4.7,grok-4.6';
@@ -725,23 +844,15 @@ async function saveConfig() {
   if (config.hfSync?.requested) {
     const syncedKeys = config.hfSync.updatedKeys || [];
     const failedKeys = (config.hfSync.results || []).filter((item) => !item.ok).map((item) => item.key);
-    fields.saveHint.textContent = config.hfSync.ok
-      ? `已保存，${syncedKeys.join(' + ') || 'HF'} 已写回 HF`
-      : `已保存，但 HF 未同步：${config.hfSync.error?.message || failedKeys.join(', ') || '请检查 HF_WRITE_TOKEN'}`;
-    renderOutput({
-      ok: true,
-      grokModel: config.fusion?.grokModel,
-      hfSync: {
-        requested: config.hfSync.requested,
-        ok: config.hfSync.ok,
-        updatedKeys: config.hfSync.updatedKeys,
-        failedKeys: (config.hfSync.results || []).filter((item) => !item.ok).map((item) => item.key),
-        error: config.hfSync.error
-      }
-    });
-    setStatus(config.hfSync.ok ? 'HF 已同步' : 'HF 未同步', config.hfSync.ok ? 'ok' : 'fail');
+    const msg = config.hfSync.ok
+      ? `设置已保存，并已同步到 Hugging Face（${syncedKeys.join('、') || '完成'}）`
+      : `设置已生效，但云端同步失败：${config.hfSync.error?.message || failedKeys.join(', ') || '请检查写回令牌'}`;
+    fields.saveHint.textContent = msg;
+    showToast(msg, config.hfSync.ok ? 'ok' : 'fail');
+    setStatus(config.hfSync.ok ? '已保存并同步' : '云端未同步', config.hfSync.ok ? 'ok' : 'fail');
   } else {
-    fields.saveHint.textContent = '已保存';
+    fields.saveHint.textContent = '设置已保存并立即生效';
+    showToast('设置已保存并立即生效', 'ok');
     setStatus('已保存', 'ok');
   }
 }
@@ -792,7 +903,8 @@ async function saveKeys() {
   if (payload.adminRequiresLogin) parts.push('Admin 口令已改，请用新口令重新登录');
   if (fields.keyStatusHint) fields.keyStatusHint.textContent = parts.join(' · ');
   const hfFailed = payload.hfSync?.requested && !payload.hfSync.ok;
-  setStatus(hfFailed ? 'HF 未同步' : '密钥已保存', hfFailed ? 'fail' : 'ok');
+  showToast(parts.join(' · '), hfFailed ? 'fail' : 'ok');
+  setStatus(hfFailed ? '云端未同步' : '密钥已保存', hfFailed ? 'fail' : 'ok');
   renderOutput({
     ok: payload.ok,
     changed: payload.changed,
@@ -810,7 +922,7 @@ async function saveKeys() {
 // Session-only action from the slimmed 安全 panel: rotate the session secret (kick all
 // old logins). Reuses the same unified endpoint with no key edits.
 async function rotateSession() {
-  if (fields.securityHint) fields.securityHint.textContent = '轮换中';
+  if (fields.securityHint) fields.securityHint.textContent = '正在重置全部会话…';
   const payload = await requestJson('/api/admin/keys', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -822,22 +934,22 @@ async function rotateSession() {
     })
   });
   if (fields.securityHfToken) fields.securityHfToken.value = '';
-  if (fields.securityHint) {
-    fields.securityHint.textContent = payload.adminRequiresLogin ? '已轮换，请重新登录' : '已轮换';
-  }
+  const doneMsg = payload.adminRequiresLogin ? '全部会话已重置，请重新输入口令登录' : '会话密钥已重置';
+  if (fields.securityHint) fields.securityHint.textContent = doneMsg;
+  showToast(doneMsg, 'ok');
   renderOutput({ ok: payload.ok, adminRequiresLogin: payload.adminRequiresLogin, hfSync: payload.hfSync });
-  setStatus('会话已轮换', 'ok');
+  setStatus('会话已重置', 'ok');
   if (payload.adminRequiresLogin) await refreshSession();
 }
 
 async function loadMonitoring() {
   const payload = await requestJson('/api/admin/monitoring');
   renderMonitoring(payload);
-  setStatus('监控已刷新', 'ok');
+  setStatus(payload.counts?.down ? `${payload.counts.down} 项异常` : '监控正常', payload.counts?.down ? 'fail' : 'ok');
 }
 
 async function probeMonitoring() {
-  renderOutput('Monitoring 主动探针中...');
+  if (fields.monitoringHint) fields.monitoringHint.textContent = '正在执行一键体检，请稍候…';
   const payload = await requestJson('/api/admin/monitoring/probe', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -845,7 +957,11 @@ async function probeMonitoring() {
   });
   renderMonitoring(payload);
   renderOutput(payload);
-  setStatus(payload.probe?.skipped ? '探针冷却' : '探针完成', payload.counts?.down ? 'fail' : 'ok');
+  const msg = payload.probe?.skipped
+    ? payload.probe.reason
+    : `体检完成：正常 ${payload.counts?.up || 0}，异常 ${payload.counts?.down || 0}`;
+  showToast(msg, payload.counts?.down ? 'fail' : 'ok');
+  setStatus(payload.probe?.skipped ? '体检冷却中' : '体检完成', payload.counts?.down ? 'fail' : 'ok');
 }
 
 async function checkRuntime() {
@@ -962,16 +1078,22 @@ function escapeHtml(value) {
 }
 
 async function testGrok() {
-  renderOutput('Grok API 测试中...');
+  if (fields.grokInlineHint) fields.grokInlineHint.textContent = '正在实测 Grok 连接与回答…';
+  renderOutput('Grok 实测中…');
   const payload = await requestJson('/api/admin/test/grok', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      query: fields.testGrokQuery.value.trim() || 'test',
+      query: fields.testGrokQuery.value.trim() || '一句话确认 Grok 连通正常',
       model: fields.grokModel.value.trim() || undefined,
       extraSources: 2
     })
   });
+  const msg = payload.ok
+    ? `Grok 测试通过（使用模型：${payload.model || getCurrentGrokModel()}）`
+    : `Grok 测试失败：${payload.error?.message || '请检查地址或密钥'}`;
+  if (fields.grokInlineHint) fields.grokInlineHint.textContent = msg;
+  if (currentGroup !== 'tests') showToast(msg, payload.ok ? 'ok' : 'fail');
   renderOutput(payload.ok ? payload : payload.error);
   setStatus(payload.ok ? 'Grok 正常' : 'Grok 异常', payload.ok ? 'ok' : 'fail');
 }
@@ -1091,42 +1213,48 @@ async function savePerplexityModel() {
 async function savePerplexityCookie() {
   const cookieJson = fields.perplexityCookieInput?.value.trim();
   if (!cookieJson) {
-    if (fields.perplexityCookieHint) fields.perplexityCookieHint.textContent = '请先填写 Cookie JSON。';
+    if (fields.perplexityCookieHint) fields.perplexityCookieHint.textContent = '请先粘贴账号 Cookie JSON。';
     return;
   }
-  if (fields.perplexityCookieHint) fields.perplexityCookieHint.textContent = '写入中';
+  if (fields.perplexityCookieHint) fields.perplexityCookieHint.textContent = '正在写入并热更新…';
   const payload = await requestJson('/api/admin/perplexity/cookie', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ cookieJson })
   });
   if (fields.perplexityCookieInput) fields.perplexityCookieInput.value = '';
-  if (fields.perplexityCookieHint) {
-    fields.perplexityCookieHint.textContent = payload.ok
-      ? `已保存（${payload.tokenCount} 个账号）· 需重启 Space 生效`
-      : `保存失败：${payload.error?.message || '未知错误'}`;
-  }
+  const msg = payload.ok
+    ? (payload.hotReloaded
+      ? `已保存 ${payload.tokenCount} 个账号并即时热更新，现在可直接测试`
+      : `已保存 ${payload.tokenCount} 个账号到云端，重启服务后生效`)
+    : `保存失败：${payload.error?.message || '未知错误'}`;
+  if (fields.perplexityCookieHint) fields.perplexityCookieHint.textContent = msg;
+  showToast(msg, payload.ok ? 'ok' : 'fail');
   if (payload.ok && fields.perplexityCookieState) {
     fields.perplexityCookieState.textContent = '已配置（不显示明文）';
   }
-  setStatus(payload.ok ? 'Cookie 已写入 HF' : 'Cookie 写入失败', payload.ok ? 'ok' : 'fail');
+  setStatus(payload.ok ? 'Cookie 已保存' : 'Cookie 写入失败', payload.ok ? 'ok' : 'fail');
   renderOutput(payload);
 }
 
 async function testPerplexity() {
-  if (fields.perplexityTestHint) fields.perplexityTestHint.textContent = '测试中';
-  renderOutput('Perplexity 连通测试中...');
+  if (fields.perplexityTestHint) fields.perplexityTestHint.textContent = '正在实测连通性…';
+  const testsHint = $('#perplexityTestFromTestsHint');
+  if (testsHint) testsHint.textContent = '正在实测连通性…';
+  renderOutput('Perplexity 连通实测中…');
   const model = fields.perplexityModelSelect?.value.trim() || undefined;
+  const query = fields.testPerplexityQuery?.value.trim() || 'who founded Tesla';
   const payload = await requestJson('/api/admin/test/perplexity', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model })
+    body: JSON.stringify({ model, query })
   });
-  if (fields.perplexityTestHint) {
-    fields.perplexityTestHint.textContent = payload.ok
-      ? `通过 · ${payload.model} · ${payload.elapsed}ms`
-      : `失败：${payload.error?.message || '未知错误'}`;
-  }
+  const hint = payload.ok
+    ? `测试通过（${payload.model}，耗时 ${payload.elapsed}ms）`
+    : `测试失败：${payload.error?.message || '未知错误'}`;
+  if (fields.perplexityTestHint) fields.perplexityTestHint.textContent = hint;
+  if (testsHint) testsHint.textContent = hint;
+  if (currentGroup !== 'tests') showToast(hint, payload.ok ? 'ok' : 'fail');
   renderOutput(payload.ok ? { ok: true, model: payload.model, elapsed: payload.elapsed, snippet: payload.snippet } : payload.error);
   setStatus(payload.ok ? 'Perplexity 正常' : 'Perplexity 异常', payload.ok ? 'ok' : 'fail');
 }
@@ -1176,11 +1304,15 @@ async function testExa() {
 }
 
 async function listGrokModels() {
-  renderOutput('读取 Grok 模型中...');
+  if (fields.grokInlineHint) fields.grokInlineHint.textContent = '正在拉取网关模型列表…';
+  renderOutput('正在读取 Grok 网关模型列表…');
   const payload = await requestJson('/api/admin/fusion/models');
   if (payload.ok) {
     const models = normalizeModelList(payload.models || []);
-    renderGrokModels(models, { source: '接口已读取' });
+    renderGrokModels(models, { source: '网关已拉取' });
+    const msg = `拉取成功：共 ${models.length} 个可用模型`;
+    if (fields.grokInlineHint) fields.grokInlineHint.textContent = msg;
+    if (currentGroup !== 'tests') showToast(msg, 'ok');
     renderOutput({
       currentModel: getCurrentGrokModel(),
       modelCount: models.length,
@@ -1188,9 +1320,12 @@ async function listGrokModels() {
     });
   } else {
     renderGrokModels(grokModelOptions, { source: '读取失败' });
+    const msg = `拉取模型失败：${payload.error?.message || '请检查地址或密钥'}`;
+    if (fields.grokInlineHint) fields.grokInlineHint.textContent = msg;
+    if (currentGroup !== 'tests') showToast(msg, 'fail');
     renderOutput(payload.error);
   }
-  setStatus(payload.ok ? '模型可选择' : '模型异常', payload.ok ? 'ok' : 'fail');
+  setStatus(payload.ok ? '模型已加载' : '模型异常', payload.ok ? 'ok' : 'fail');
 }
 
 function bindAction(selector, action) {
@@ -1205,19 +1340,29 @@ function bindAction(selector, action) {
       if (error.status === 401) {
         await refreshSession();
       }
-      setStatus('异常', 'fail');
-      renderOutput(error.message || String(error));
+      const errMsg = error.message || String(error);
+      setStatus('操作异常', 'fail');
+      showToast(`操作失败：${errMsg}`, 'fail');
+      renderOutput(errMsg);
     } finally {
       button.disabled = false;
     }
   });
 }
 
-bindAction('#refreshConfig', loadConfig);
+bindAction('#refreshConfig', async () => {
+  await loadConfig();
+  await checkRuntime();
+  await hydrateActiveSubview();
+  showToast('配置与状态已刷新', 'ok');
+});
 bindAction('#saveConfig', saveConfig);
 bindAction('#loginAdmin', loginAdmin);
 bindAction('#logoutAdmin', logoutAdmin);
-bindAction('#checkRuntime', checkRuntime);
+bindAction('#checkRuntime', async () => {
+  await checkRuntime();
+  showToast('运行状态检查完成', 'ok');
+});
 bindAction('#testSearch', testSearch);
 bindAction('#testSearchSh', testSearchSh);
 bindAction('#auditSearch2api', auditSearch2api);
@@ -1226,7 +1371,10 @@ bindAction('#rotateSession', rotateSession);
 bindAction('#loadLogs', loadLogs);
 bindAction('#saveKeys', saveKeys);
 bindAction('#refreshKeyStatus', loadKeyStatus);
-bindAction('#refreshMonitoring', loadMonitoring);
+bindAction('#refreshMonitoring', async () => {
+  await loadMonitoring();
+  showToast('健康看板已刷新', 'ok');
+});
 bindAction('#probeMonitoring', probeMonitoring);
 bindAction('#testGrok', testGrok);
 bindAction('#testGrokFromPreview', testGrok);
@@ -1247,7 +1395,30 @@ bindAction('#testExa', testExa);
 bindAction('#testExaFromTests', testExa);
 bindAction('#resetGrokPrompt', async () => {
   fields.grokSystemPrompt.value = defaultGrokSystemPrompt;
-  fields.saveHint.textContent = '提示词已恢复，保存后生效';
+  fields.saveHint.textContent = '提示词已恢复默认，点右侧保存即可生效';
+  showToast('已恢复默认提示词，记得保存', 'ok');
+});
+
+// 登录框回车直接提交
+fields.adminTokenInput?.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    fields.loginAdmin?.click();
+  }
+});
+
+// 监控卡片「去测试」快捷跳转 + 顶部彩条跳转对应卡片
+fields.monitoringServices?.addEventListener('click', (event) => {
+  const btn = event.target.closest('.uptimer-quick-btn[data-goto-test]');
+  if (!btn) return;
+  setActiveRoute('tests', btn.dataset.gotoTest);
+});
+
+fields.monitorBars?.addEventListener('click', (event) => {
+  const bar = event.target.closest('.monitor-bar[data-jump-service]');
+  if (!bar) return;
+  const card = document.getElementById(`monitor-card-${bar.dataset.jumpService}`);
+  if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
 });
 
 fields.grokModel?.addEventListener('input', () => {
@@ -1291,9 +1462,11 @@ window.addEventListener('hashchange', () => {
   setActiveRoute(...normalizeRoute(window.location.hash), false);
 });
 
-setActiveRoute(...normalizeRoute(window.location.hash), false);
+// 先确认登录态，再渲染当前路由与拉取子页数据，避免未登录时发 401 噪音或登录后监控空白
 const session = await refreshSession();
+setActiveRoute(...normalizeRoute(window.location.hash), false);
 if (!(session.adminAuthEnabled && !session.adminAuthenticated)) {
   await loadConfig();
   await checkRuntime();
+  await hydrateActiveSubview();
 }

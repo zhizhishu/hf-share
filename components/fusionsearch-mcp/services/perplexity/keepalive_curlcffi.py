@@ -55,18 +55,20 @@ def main() -> None:
 
     tok = tokens[0]
     token_id = tok.get("id", "")
-    session_token = tok.get("session_token", "")
-    csrf_token = tok.get("csrf_token", "")
+    session_token = (tok.get("session_token") or "").strip()
+    csrf_token = (tok.get("csrf_token") or "").strip()
+    extra_cookies = tok.get("cookies") if isinstance(tok.get("cookies"), dict) else {}
+    extra_cookies = {str(k): str(v) for k, v in extra_cookies.items() if k and v}
 
-    if not session_token or not csrf_token:
+    if not ((session_token and csrf_token) or extra_cookies):
         print(
-            f"[keepalive] token id={token_id!r} missing session_token or csrf_token; skip"
+            f"[keepalive] token id={token_id!r} missing auth cookies (legacy pair or rolling cookies); skip"
         )
         return
 
     print(
         f"[keepalive] token id={token_id!r} "
-        f"session={_tail8(session_token)} csrf={_tail8(csrf_token)}"
+        f"session={_tail8(session_token)} csrf={_tail8(csrf_token)} extra={len(extra_cookies)}"
     )
 
     # ── 2. 代理 env（优先级: KEEPALIVE > SOCKS > 通用 SOCKS）───────────────
@@ -84,10 +86,21 @@ def main() -> None:
     # ── 3. curl_cffi 请求 session 端点 ──────────────────────────────────────
     from curl_cffi import requests as cffi  # noqa: PLC0415
 
-    cookies = {
-        "__Secure-next-auth.session-token": session_token,
-        "next-auth.csrf-token": csrf_token,
-    }
+    cookies = {}
+    if session_token:
+        cookies["__Secure-next-auth.session-token"] = session_token
+    if csrf_token:
+        cookies["next-auth.csrf-token"] = csrf_token
+    cookies.update(extra_cookies)
+
+    account_hint = cookies.get("__Host-pplx-last-active-account", "")
+    if not account_hint:
+        for k in cookies:
+            if k.startswith("__Secure-pplx.session."):
+                account_hint = k[len("__Secure-pplx.session."):]
+                break
+    req_headers = {"x-pplx-account": account_hint} if account_hint else {}
+
     kwargs: dict = {}
     if proxy_url:
         kwargs["proxies"] = {"http": proxy_url, "https": proxy_url}
@@ -96,6 +109,7 @@ def main() -> None:
         r = cffi.get(
             "https://www.perplexity.ai/api/auth/session",
             cookies=cookies,
+            headers=req_headers,
             impersonate="chrome",
             timeout=30,
             **kwargs,
@@ -116,12 +130,21 @@ def main() -> None:
             pass
     print(f"[keepalive] logged_in={logged_in}")
 
-    # 抓 rotation 后的新 cookie：r.cookies 是 Cookies 对象，支持 .get(name)
-    # 无 Set-Cookie 则 .get() 返回 None，退回旧值
+    # 抓 rotation 后的新 cookie（同时兼容老 next-auth 与新 __Secure-pplx.session.*）
     new_session_token = r.cookies.get("__Secure-next-auth.session-token") or session_token
     new_csrf_token = r.cookies.get("next-auth.csrf-token") or csrf_token
+    new_extra = dict(extra_cookies)
+    for cname, cval in r.cookies.items():
+        if not cval:
+            continue
+        if cname == "__Host-pplx-last-active-account" or cname.startswith("__Secure-pplx.session."):
+            new_extra[cname] = cval
 
-    rotated = (new_session_token != session_token) or (new_csrf_token != csrf_token)
+    rotated = (
+        (new_session_token != session_token)
+        or (new_csrf_token != csrf_token)
+        or (new_extra != extra_cookies)
+    )
 
     if not rotated:
         print("[keepalive] session kept warm (no rotation)")
@@ -131,12 +154,17 @@ def main() -> None:
     print(
         f"[keepalive] rotation detected: "
         f"session {_tail8(session_token)} → {_tail8(new_session_token)}, "
-        f"csrf {_tail8(csrf_token)} → {_tail8(new_csrf_token)}"
+        f"csrf {_tail8(csrf_token)} → {_tail8(new_csrf_token)}, "
+        f"extra_keys={list(new_extra.keys())}"
     )
 
     # 在原 dict 上原地改（保留 heart_beat 等其它字段）
-    tok["session_token"] = new_session_token
-    tok["csrf_token"] = new_csrf_token
+    if new_session_token:
+        tok["session_token"] = new_session_token
+    if new_csrf_token:
+        tok["csrf_token"] = new_csrf_token
+    if new_extra:
+        tok["cookies"] = new_extra
 
     try:
         with open(pool_path, "w", encoding="utf-8") as f:
@@ -149,7 +177,7 @@ def main() -> None:
     admin_token = os.environ.get("PPLX_ADMIN_TOKEN", "")
     if admin_token:
         try:
-            body = json.dumps(pool_cfg).encode()
+            body = json.dumps({**pool_cfg, "replace": True}).encode()
             status = _http_post(
                 "http://127.0.0.1:8001/pool/import",
                 body=body,
@@ -169,15 +197,17 @@ def main() -> None:
     sync_token = os.environ.get("PERPLEXITY_SYNC_TOKEN", "")
     if sync_token:
         try:
-            payload = json.dumps(
-                {
-                    "id": token_id,
-                    "session_token": new_session_token,
-                    "csrf_token": new_csrf_token,
-                }
-            ).encode()
+            sync_payload = {
+                "id": token_id,
+                "session_token": new_session_token,
+                "csrf_token": new_csrf_token,
+            }
+            if new_extra:
+                sync_payload["cookies"] = new_extra
+            payload = json.dumps(sync_payload).encode()
+            port = os.environ.get("PORT", "3000")
             status2 = _http_post(
-                "http://127.0.0.1:1666/api/perplexity/sync-token",
+                f"http://127.0.0.1:{port}/api/perplexity/sync-token",
                 body=payload,
                 headers={
                     "Content-Type": "application/json",
