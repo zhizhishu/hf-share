@@ -1,0 +1,29 @@
+node_modules/
+npm-debug.log
+.DS_Store
+TASK_LOG.md
+.codex-runtime/
+LOCAL_ACCESS_PASSWORD.txt
+.zhongzhuan-backup.json
+.all-subs-backup.json
+.cheche-backup.json
+.jiaguwen-backup.json
+*-backup*.json
+PROJECT_ID.md.bak-*
+.artifacts/
+
+# 本地项目记忆文件（mindfile），不入库
+PROJECT_ID.md
+AGENTS.md
+PROJECT_CONTEXT.md
+TASK.md
+LOG.md
+
+# 侦察/分析用上游成品（构建时才下载，本地分析勿入库）
+.artifacts/
+
+# 去 fork：暴露上游关系的文档 + 旧归档，只放本地、不进公开库
+cirrus-build-recipe.md
+_archive/
+archive/
+cover/README-INTEGRATION.md

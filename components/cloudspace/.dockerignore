@@ -1,0 +1,31 @@
+.git
+.gitignore
+.gitattributes
+.github
+node_modules
+npm-debug.log
+.DS_Store
+
+# upstream README is not needed in the GHCR build (HF Space uses its own minimal Dockerfile)
+README.md
+
+# local-only: recon/build scratch, secrets, backups, project memory — never ship to build context
+.artifacts/
+.codex-runtime/
+_archive/
+archive/
+TASK_LOG.md
+LOCAL_ACCESS_PASSWORD.txt
+.zhongzhuan-backup.json
+.all-subs-backup.json
+.cheche-backup.json
+PROJECT_ID.md
+PROJECT_ID.md.bak-*
+AGENTS.md
+PROJECT_CONTEXT.md
+TASK.md
+LOG.md
+cirrus-build-recipe.md
+cover/cover.src.js
+cover/build.mjs
+cover/README-INTEGRATION.md

@@ -1,0 +1,38 @@
+name: Publish CloudSpace image
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/zhizhishu/cloudspace:latest
+            ghcr.io/zhizhishu/cloudspace:sha-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/zhizhishu/cloudspace
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.description=CloudSpace private subscription workspace image
