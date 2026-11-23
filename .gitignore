@@ -1,26 +1,48 @@
+# --- build & runtime artifacts ---
 node_modules/
-Search-2api/
+**/node_modules/
+npm-debug.log
 logs/
+**/logs/
 config/runtime.json
 config/runtime.json.tmp
-npm-debug.log
-.env
-.env.*
-!.env.example
+**/config/runtime.json
+**/config/runtime.json.tmp
+components/clawemail/dist/
+components/clawemail/data/
+Search-2api/
 __pycache__/
+**/__pycache__/
 *.py[cod]
 
-# --- project-local only: never push to public HF/GitHub ---
+# --- secrets & env (never push to public GitHub) ---
+.env
+.env.*
+**/.env
+**/.env.*
+!.env.example
+!**/.env.example
+**/.dev.vars
+**/.secrets/
+LOCAL_ACCESS_PASSWORD.txt
+
+# --- mindfile project-tidy boundary (local-only 🔒) ---
+/private/
 /reference/
 /archive/
 /.artifacts/
-PROJECT_ID.md
-AGENTS.md
-PROJECT_CONTEXT.md
-TASK.md
-LOG.md
-PROJECT_MAP.md
-# internal planning docs — keep local, do not publish
-HF_MIGRATION_PLAN.md
-HF_SPACE_CONSOLIDATION_PLAN.md
-.serena/
+/.scratch/
+/.pi-skill/
+/.serena/
+/.claude/
+/PROJECT_ID.md
+/AGENTS.md
+/CLAUDE.md
+/PROJECT_CONTEXT.md
+/TASK.md
+/LOG.md
+/LOG.archive.md
+/PROJECT_MAP.md
+/HF_MIGRATION_PLAN.md
+/HF_SPACE_CONSOLIDATION_PLAN.md
+/_mem_audit_status.json

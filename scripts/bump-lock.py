@@ -1,4 +1,9 @@
-"""Update assembly revisions using local tracking refs only; never fetch."""
+"""Update external private build revisions using local tracking refs only; never fetch.
+
+Default (no flag)      : rewrite repos.lock from private/icloud-hme local tracking ref.
+--check                : compare repos.lock to local tracking ref (0 match, 1 differ, 2 unreadable).
+--check --lock-only    : validate repos.lock format/key set only; never touches private/ repos.
+"""
 import argparse
 import os
 from pathlib import Path
@@ -6,14 +11,13 @@ import re
 import subprocess
 
 SOURCES = {
-    "FUSION_SHA": ("fusionsearch-mcp", "github/main"),
-    "CLAWEMAIL_SHA": ("ClawEmail", "origin/main"),
-    "CLOUDSPACE_SHA": ("cloudspace", "origin/main"),
-    "ICLOUD_HME_SHA": ("icloud-hme", "origin/claw-gate"),
+    "ICLOUD_HME_SHA": ("private/icloud-hme", "origin/claw-gate"),
 }
+SHA = re.compile(r"[0-9a-fA-F]{40}")
 HEADER = (
-    "# Single source of truth for build revisions.\n"
-    "# Bump from sibling local tracking refs: python scripts/bump-lock.py (no network).\n"
+    "# Single source of truth for external private build revisions.\n"
+    "# Public components (fusionsearch-mcp / clawemail / cloudspace) live in components/ directly.\n"
+    "# Bump from local private/icloud-hme tracking ref: python scripts/bump-lock.py (no network).\n"
 )
 
 
@@ -29,10 +33,11 @@ def git(repo, *args):
     return result.stdout.strip()
 
 
-def revisions(group):
+def revisions(repo_root):
+    """Read pins from local private repos' tracking refs; a missing repo is an error."""
     values = {}
-    for key, (name, ref) in SOURCES.items():
-        repo = group / name
+    for key, (rel_path, ref) in SOURCES.items():
+        repo = repo_root / rel_path
         try:
             sha = git(repo, "rev-parse", "--verify", f"refs/remotes/{ref}^{{commit}}")
         except RuntimeError:
@@ -44,52 +49,89 @@ def revisions(group):
                            "--format=%(refname:short)").splitlines()
             if not any(branch.startswith("origin/") for branch in branches):
                 raise RuntimeError("icloud-hme HEAD is not contained in any origin ref")
-        if not re.fullmatch(r"[0-9a-fA-F]{40}", sha):
-            raise RuntimeError(f"{name}: invalid SHA")
+        if not SHA.fullmatch(sha):
+            raise RuntimeError(f"{rel_path}: invalid SHA")
         values[key] = sha.lower()
     return values
 
 
 def parse_lock(text):
+    """Strictly parse repos.lock: comments/blank lines ok, everything else must be KEY=<40 hex>."""
+    allowed = ", ".join(sorted(SOURCES))
     values = {}
     for line in text.splitlines():
         if not line.strip() or line.lstrip().startswith("#"):
             continue
-        match = re.fullmatch(r"([A-Z_]+)=([0-9a-fA-F]{40})", line)
-        if not match or match[1] not in SOURCES or match[1] in values:
-            raise ValueError("Invalid or duplicate repos.lock entry")
-        values[match[1]] = match[2].lower()
-    if set(values) != set(SOURCES):
-        raise ValueError("repos.lock must contain exactly four revision keys")
+        key, sep, value = line.partition("=")
+        if not sep or key not in SOURCES:
+            raise ValueError(f"unknown repos.lock key {key!r} (allowed: {allowed})")
+        if key in values:
+            raise ValueError(f"duplicate repos.lock key {key}")
+        if not SHA.fullmatch(value):
+            raise ValueError(f"repos.lock key {key} needs a 40 hex digit SHA, got {value!r}")
+        values[key] = value.lower()
+    missing = sorted(set(SOURCES) - set(values))
+    if missing:
+        raise ValueError(f"repos.lock missing revision keys: {', '.join(missing)}")
     return values
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--check", action="store_true", help="exit 1 if revisions differ")
-    args = parser.parse_args()
-    assembly = Path(__file__).resolve().parents[1]
-    lock = assembly / "repos.lock"
+def run_lock_only(lock):
+    """Validate the lock's format and key set offline. No sibling repos, no network, no writes."""
     try:
-        values = revisions(assembly.parent)
-        try:
-            previous = parse_lock(lock.read_text(encoding="utf-8"))
-        except (FileNotFoundError, ValueError) as exc:
-            print(f"Current lock unavailable or invalid: {exc}")
-            previous = {}
-        for key, sha in values.items():
-            print(f"{key}: {previous.get(key, '(missing)')} → {sha}")
-        differs = previous != values
-        if args.check:
-            print("Lock differs" if differs else "Lock matches local tracking refs")
-            return int(differs)
-        if differs:
-            lock.write_text(HEADER + "".join(f"{key}={sha}\n" for key, sha in values.items()),
-                            encoding="utf-8", newline="\n")
-        return 0
-    except (RuntimeError, OSError, subprocess.TimeoutExpired) as exc:
+        values = parse_lock(lock.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
         print(f"ERROR: {exc}")
         return 2
+    for key, sha in values.items():
+        print(f"{key}: {sha}")
+    print("Lock format and key set OK (offline check).")
+    return 0
+
+
+def run_compare(repo_root, lock, check):
+    """Compare (or, without check, rewrite) the lock from local private repo tracking refs."""
+    try:
+        values = revisions(repo_root)
+    except (RuntimeError, OSError, subprocess.TimeoutExpired) as exc:
+        print(f"ERROR: cannot read source revisions: {exc}")
+        return 2
+    try:
+        previous = parse_lock(lock.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        if check:
+            print(f"ERROR: cannot compare, current lock unreadable or invalid: {exc}")
+            return 2
+        print(f"Current lock unavailable or invalid: {exc} (rewriting it)")
+        previous = {}
+    for key, sha in values.items():
+        print(f"{key}: {previous.get(key, '(missing)')} -> {sha}")
+    differs = previous != values
+    if check:
+        print("Lock differs from local tracking refs" if differs
+              else "Lock matches local tracking refs")
+        return int(differs)
+    if differs:
+        lock.write_text(HEADER + "".join(f"{key}={sha}\n" for key, sha in values.items()),
+                        encoding="utf-8", newline="\n")
+    return 0
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--check", action="store_true",
+                        help="compare lock to local tracking refs; 0 match, 1 differs, 2 unreadable")
+    parser.add_argument("--lock-only", action="store_true",
+                        help="with --check: validate the lock offline only (no private repo, no writes)")
+    args = parser.parse_args(argv)
+    if args.lock_only and not args.check:
+        parser.error("--lock-only requires --check; it only ever validates, never updates")
+    repo_root = Path(__file__).resolve().parents[1]
+    lock = repo_root / "repos.lock"
+    if args.lock_only:
+        return run_lock_only(lock)
+    return run_compare(repo_root, lock, args.check)
 
 
 if __name__ == "__main__":

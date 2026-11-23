@@ -1,30 +1,79 @@
-node_modules
-npm-debug.log
-logs/*
-config/runtime.json
-config/runtime.json.tmp
+# --- local-only / secrets / private repos (never enter Docker build context) ---
 .git
+**/.git
 .gitignore
-TASK_LOG.md
-HF_MIGRATION_PLAN.md
-Search-2api
+.env
+.env.*
+**/.env
+**/.env.*
+!.env.example
+!**/.env.example
+**/.dev.vars
+**/.secrets
+**/.secrets/**
+private
+private/**
 reference
+reference/**
 archive
+archive/**
+.artifacts
+.artifacts/**
+.scratch
+.scratch/**
+.pi-skill
+.pi-skill/**
+.serena
+.serena/**
+.claude
+.claude/**
+.spec-workflow
+.spec-workflow/**
+.codex-runtime
+.codex-runtime/**
+
+# mindfile memory files (root and any component)
 PROJECT_ID.md
 AGENTS.md
+CLAUDE.md
 PROJECT_CONTEXT.md
 TASK.md
 LOG.md
+LOG.archive.md
 PROJECT_MAP.md
+**/PROJECT_ID.md
+**/AGENTS.md
+**/CLAUDE.md
+**/PROJECT_CONTEXT.md
+**/TASK.md
+**/LOG.md
+**/LOG.archive.md
+**/PROJECT_MAP.md
+TASK_LOG.md
+HF_MIGRATION_PLAN.md
 HF_SPACE_CONSOLIDATION_PLAN.md
+LOCAL_ACCESS_PASSWORD.txt
 
-# 2026-07-14: 剔除 vendored perplexity 未启用的浏览器自动化死代码及其编译残渣，防 HF 反滥用
-# 静态扫描误报。相关源文件已物理删除；连同所有 Python 字节码缓存一并排除，根治二进制残留。
-# ⚠️ emailnator.py 被 client.py 顶层 import(server 启动必经)，绝不能排除，否则服务崩溃循环。
+# build/runtime clutter
+node_modules
+**/node_modules
+npm-debug.log
+logs
+logs/*
+**/logs/*
+config/runtime.json
+config/runtime.json.tmp
+**/config/runtime.json
+**/config/runtime.json.tmp
+components/clawemail/data
+components/clawemail/dist
+components/clawemail/demo
+components/clawemail/design-demos
+Search-2api
+
+# 2026-07-14: 剔除 vendored perplexity 未启用异步/浏览器残留及全部 Python 字节码缓存，防 HF Cast AI 误报
+# ⚠️ emailnator.py 被 client.py 顶层 import，绝不能排除
 **/__pycache__
 **/*.pyc
-services/perplexity/perplexity_async
-
-# 2026-07-15: 合并 clawemail — mail/ 子目录的依赖不进 build context(claw-builder 阶段重新 npm ci + build)。
-# 注意只排 node_modules，绝不排 mail/ 整体(Dockerfile.claw-merge 的 claw-builder 要 COPY mail/ 源码)。
-**/node_modules
+**/*.pyo
+components/fusionsearch-mcp/services/perplexity/perplexity_async

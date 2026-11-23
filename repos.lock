@@ -1,6 +1,4 @@
-# Single source of truth for build revisions.
-# Bump from sibling local tracking refs: python scripts/bump-lock.py (no network).
-FUSION_SHA=9d41406dd4bb360d3d6c0e2134a8004fb4271116
-CLAWEMAIL_SHA=cf42405db0c85674a8c3d255e49906aaec3bc17b
-CLOUDSPACE_SHA=9baea8bb5ed38dd30c27fddb7819751d03b0a5d0
+# Single source of truth for external private build revisions.
+# Public components (fusionsearch-mcp / clawemail / cloudspace) live in components/ directly.
+# Bump from local private/icloud-hme tracking ref: python scripts/bump-lock.py (no network).
 ICLOUD_HME_SHA=5ac5b373dabdbc412de29a37e4dc9eaf0c179d46
