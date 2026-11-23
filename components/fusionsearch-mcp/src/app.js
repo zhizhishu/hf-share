@@ -3491,15 +3491,18 @@ document.getElementById('all').addEventListener('click',function(){var lines=[].
     const pplxBase = (config.perplexityApiUrl || '').replace(/\/v1\/?$/, '').replace(/\/+$/, '');
     const pplxAdminToken = process.env.PPLX_ADMIN_TOKEN || '';
     if (pplxBase && pplxAdminToken) {
+      const hotTimeout = createTimeoutSignal(10000);
       try {
         const r = await fetch(pplxBase + '/pool/import', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-Admin-Token': pplxAdminToken },
           body: JSON.stringify({ ...poolConfig, replace: true }),
-          signal: createTimeoutSignal(10000)
+          signal: hotTimeout.signal
         });
         hotReloaded = r.ok;
-      } catch (e) { hotReloaded = false; }
+      } catch (e) { hotReloaded = false; } finally {
+        hotTimeout.clear();
+      }
     }
     logEvent('info', 'perplexity', 'token auto-synced via userscript', { id, hfWritten, hotReloaded });
     res.json({
@@ -3607,15 +3610,18 @@ document.getElementById('all').addEventListener('click',function(){var lines=[].
       const pplxBase = (config.perplexityApiUrl || '').replace(/\/v1\/?$/, '').replace(/\/+$/, '');
       const pplxAdminToken = process.env.PPLX_ADMIN_TOKEN || '';
       if (pplxBase && pplxAdminToken) {
+        const hotTimeout = createTimeoutSignal(10000);
         try {
           const r = await fetch(pplxBase + '/pool/import', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-Admin-Token': pplxAdminToken },
             body: JSON.stringify({ ...parsed, replace: true }),
-            signal: createTimeoutSignal(10000)
+            signal: hotTimeout.signal
           });
           hotReloaded = r.ok;
-        } catch { hotReloaded = false; }
+        } catch { hotReloaded = false; } finally {
+          hotTimeout.clear();
+        }
       }
     }
     logEvent(ok ? 'info' : 'warn', 'perplexity', 'Perplexity cookie config update finished', {
